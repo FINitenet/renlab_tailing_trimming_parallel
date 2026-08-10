@@ -1,7 +1,19 @@
 # Parallel miRNA tailing/trimming workflow
 
-这是从 `renlab_tailing_trimming_20240111` 重新整理出的独立版本。Python、R
-脚本和运行期数据文件都保存在本目录，不再调用 `TRMRNAseqTools` 或其他脚本目录。
+## 项目简介
+
+这是一套面向植物 small RNA-seq 数据的 miRNA 3′ 端加尾（tailing）和剪切
+（trimming）分析流程。流程从单端 FASTQ 数据出发，完成接头及低质量序列过滤，
+先排除 tRNA/snoRNA，再将 reads 比对到 miRNA hairpin；对于未比对的 reads，依次从
+3′ 端剪去 1–10 nt 后重新比对，从而统计每条 miRNA 的加尾和剪切长度及其碱基组成。
+
+除 tailing/trimming 分析外，流程还可以完成常规或 UMI small RNA 的基因组比对、
+mapping rate 汇总、reads/5GMC 长度分布，以及 tail-base 表格和图形输出。多个样本可
+受控并行运行，适合批量处理植物 small RNA-seq 项目。
+
+本项目由 `renlab_tailing_trimming_20240111` 重构而来。Python 和 R 分析逻辑已整合
+到当前仓库，不再调用 `TRMRNAseqTools` 或其他外部脚本目录；Bowtie 索引和
+`resources/` 参考表仍作为本地数据单独提供。
 
 ## 相比原版本的提升
 
