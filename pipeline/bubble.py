@@ -66,7 +66,6 @@ def _plot_sample(axis, matrix, sample, total, color):
 
 
 def run(samples, config):
-    output_dir = Path(config["output_dir"])
     output_file = Path(config["bubble_output"])
     sample_names = [sample for sample, _ in samples]
     if not sample_names:
@@ -81,7 +80,7 @@ def run(samples, config):
         )
         return
 
-    profile_root = output_dir / "4_163.results"
+    profile_root = Path(config["profile_dir"])
     for sample in sample_names:
         sample_dir = profile_root / sample
         if not sample_dir.is_dir():

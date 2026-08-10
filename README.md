@@ -139,8 +139,42 @@ python3 main.py \
 `-` 统一转换为下划线 `_`。如果文件名为 `sample_R1.fastq.gz`，可使用：
 
 ```bash
-python3 main.py -i 1_rawdata -o results --suffix _R1.fastq.gz
+python3 main.py -i 1_rawdata -o project_output --suffix _R1.fastq.gz
 ```
+
+## 输出目录
+
+新项目默认将可重建的中间文件放入 `work/`，将用于检查、统计和发表的结果放入
+`results/`。两条分析分支分别存放，避免编号目录相互混杂：
+
+```text
+project_output/
+├── work/
+│   ├── tailing_trimming/
+│   │   ├── trimmed_fasta/
+│   │   └── remapping/<sample>/
+│   └── srna/
+│       ├── trimmed/
+│       ├── umi/
+│       └── genome_mapping/
+└── results/
+    ├── tailing_trimming/
+    │   ├── profiles/
+    │   ├── 5gmc/
+    │   ├── sequence_logo/
+    │   ├── length/
+    │   ├── bubble/tailing_trimming_bubble.pdf
+    │   └── tailbase/
+    │       ├── tables/<sample>/
+    │       ├── plots/<sample>/
+    │       └── workspace/
+    └── srna/
+        └── mapping_summary.tsv
+```
+
+`--layout auto` 是默认设置：新项目采用上述结构；如果检测到旧版的
+`3_remapping/` 或 `4_163.results/`，则继续使用原目录，避免重复计算。也可以显式
+使用 `--layout organized` 或 `--layout legacy`。
 
 ## 分步运行
 
@@ -158,25 +192,26 @@ python3 main.py -i 1_rawdata -o results --suffix _R1.fastq.gz
 例如只运行前两个步骤：
 
 ```bash
-python3 main.py -i 1_rawdata -o results --steps preprocess,profile -j 2
+python3 main.py -i 1_rawdata -o project_output --steps preprocess,profile -j 2
 ```
 
 已有 profile 结果时，可单独生成类似 `new.pdf` 的多页气泡图：
 
 ```bash
 python3 main.py \
-  -o results \
+  -o project_output \
   --steps bubble \
   --filelist filelist \
   --bubble-cols 2
 ```
 
-默认输出为
-`5_GMC_analysis/plot_bubble/tailing_trimming_bubble.pdf`。`--bubble-cols` 控制每行
+整洁目录中的默认输出为
+`results/tailing_trimming/bubble/tailing_trimming_bubble.pdf`。`--bubble-cols` 控制每行
 显示的样本数，`--bubble-output` 可指定 PDF 路径。
 
-从已有 `3_remapping/<sample>/` 继续运行时，可以省略原始 FASTQ，或用
-`--filelist` 指定样本。`--resume` 会根据每一步的最终输出跳过已完成样本；
+从已有 `work/tailing_trimming/remapping/<sample>/` 继续运行时，可以省略原始
+FASTQ，或用 `--filelist` 指定样本。旧目录通过 `--layout legacy` 继续支持。
+`--resume` 会根据每一步的最终输出跳过已完成样本；
 `--dry-run` 用于检查样本、参数、索引和即将执行的命令。
 
 UMI 文库使用 `--umi-flag 1`，普通小 RNA 文库使用默认值 `2`。

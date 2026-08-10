@@ -46,6 +46,8 @@ def parse_args(argv=None):
     )
     parser.add_argument("-i", "--input", default="1_rawdata", help="raw FASTQ directory")
     parser.add_argument("-o", "--output", default=".", help="project output directory")
+    parser.add_argument("--layout", choices=("auto", "organized", "legacy"), default="auto",
+                        help="output layout: auto preserves existing legacy projects; new projects use organized")
     parser.add_argument("-j", "--jobs", type=int, default=1,
                         help="maximum concurrent samples (default: 1)")
     parser.add_argument("--threads-per-sample", type=int, default=8,
@@ -67,10 +69,11 @@ def parse_args(argv=None):
     parser.add_argument("--rscript", default=DEFAULT_RSCRIPT,
                         help=f"Rscript executable used by tailbase (default: {DEFAULT_RSCRIPT})")
     parser.add_argument("--bubble-output", default=None,
-                        help="multi-page bubble plot PDF; default: <output>/5_GMC_analysis/plot_bubble/tailing_trimming_bubble.pdf")
+                        help="multi-page bubble plot PDF; default depends on --layout")
     parser.add_argument("--bubble-cols", type=int, default=2,
                         help="number of sample panels per row in the bubble plot (default: 2)")
-    parser.add_argument("--mapping-tag", default="4_mapping")
+    parser.add_argument("--mapping-tag", default="4_mapping",
+                        help="legacy mapping directory/output tag (default: 4_mapping)")
     parser.add_argument("--mapping-results", default=None,
                         help="mapping summary table; default: <output>/mapping_results_bowtie_<tag>.csv")
     parser.add_argument("--filelist", default=None,
@@ -109,18 +112,17 @@ def _read_filelist(path):
     return [(name.replace("-", "_"), None) for name in names]
 
 
-def _discover_existing_samples(output_dir):
-    remapping = output_dir / "3_remapping"
+def _discover_existing_samples(remapping):
     if remapping.is_dir():
         names = sorted(path.name for path in remapping.iterdir() if path.is_dir())
         if names:
             return [(name, None) for name in names]
     raise FileNotFoundError(
-        "Cannot discover samples: provide --filelist, raw input files, or 3_remapping sample directories"
+        f"Cannot discover samples: provide --filelist, raw input files, or sample directories in {remapping}"
     )
 
 
-def build_samples(args, steps, output_dir):
+def build_samples(args, steps, config):
     if not set(steps).intersection({"preprocess", "profile", "bubble", "srna", "length", "tailbase"}):
         return []
     if args.filelist:
@@ -132,12 +134,15 @@ def build_samples(args, steps, output_dir):
         except FileNotFoundError:
             if "preprocess" in steps or "srna" in steps:
                 raise
-    return _discover_existing_samples(output_dir)
+    return _discover_existing_samples(config["remapping_dir"])
 
 
 def preflight(args, steps, config):
-    for key in ("meta_file", "tailbase_script", "mechanism_file", "sequence_merge_file"):
-        require_file(config[key], key.replace("_", " "))
+    if set(steps).intersection({"profile", "bubble", "length", "tailbase"}):
+        require_file(config["meta_file"], "meta file")
+    if "tailbase" in steps:
+        for key in ("tailbase_script", "mechanism_file", "sequence_merge_file"):
+            require_file(config[key], key.replace("_", " "))
     if args.jobs < 1 or args.threads_per_sample < 1 or args.bubble_cols < 1:
         raise ValueError("--jobs, --threads-per-sample, and --bubble-cols must be at least 1")
     if "preprocess" in steps:
@@ -155,16 +160,68 @@ def preflight(args, steps, config):
 
 def build_config(args):
     output_dir = Path(args.output).expanduser().resolve()
+    layout = args.layout
+    if layout == "auto":
+        legacy_markers = (output_dir / "3_remapping", output_dir / "4_163.results")
+        organized_markers = (output_dir / "work", output_dir / "results")
+        if any(path.exists() for path in organized_markers):
+            layout = "organized"
+        elif any(path.exists() for path in legacy_markers):
+            layout = "legacy"
+        else:
+            layout = "organized"
+
+    if layout == "organized":
+        tt_work = output_dir / "work" / "tailing_trimming"
+        srna_work = output_dir / "work" / "srna"
+        tt_results = output_dir / "results" / "tailing_trimming"
+        srna_results = output_dir / "results" / "srna"
+        paths = {
+            "format_dir": tt_work / "trimmed_fasta",
+            "remapping_dir": tt_work / "remapping",
+            "profile_dir": tt_results / "profiles",
+            "gmc_dir": tt_results / "5gmc",
+            "seqlogo_dir": tt_results / "sequence_logo",
+            "length_dir": tt_results / "length",
+            "tailbase_doc_dir": tt_results / "tailbase" / "tables",
+            "tailbase_plot_dir": tt_results / "tailbase" / "plots",
+            "tailbase_bin_dir": tt_results / "tailbase" / "workspace",
+            "srna_trim_dir": srna_work / "trimmed",
+            "srna_umi_dir": srna_work / "umi",
+            "srna_mapping_dir": srna_work / "genome_mapping",
+        }
+        default_bubble = tt_results / "bubble" / "tailing_trimming_bubble.pdf"
+        default_mapping_results = srna_results / "mapping_summary.tsv"
+    else:
+        summary_dir = output_dir / "5_GMC_analysis"
+        paths = {
+            "format_dir": output_dir / "2_formmat_fasta",
+            "remapping_dir": output_dir / "3_remapping",
+            "profile_dir": output_dir / "4_163.results",
+            "gmc_dir": summary_dir,
+            "seqlogo_dir": summary_dir / "doc_seqlogo",
+            "length_dir": output_dir,
+            "tailbase_doc_dir": summary_dir / "doc",
+            "tailbase_plot_dir": summary_dir / "plot",
+            "tailbase_bin_dir": summary_dir / "bin",
+            "srna_trim_dir": output_dir / "2_trim_adapter",
+            "srna_umi_dir": output_dir / "3_extract_umi",
+            "srna_mapping_dir": output_dir / "4_mapping",
+        }
+        default_bubble = summary_dir / "plot_bubble" / "tailing_trimming_bubble.pdf"
+        default_mapping_results = output_dir / f"mapping_results_bowtie_{args.mapping_tag}.csv"
+
     bubble_output = (
         Path(args.bubble_output).expanduser().resolve() if args.bubble_output
-        else output_dir / "5_GMC_analysis" / "plot_bubble" / "tailing_trimming_bubble.pdf"
+        else default_bubble
     )
     mapping_results = (
         Path(args.mapping_results).expanduser().resolve() if args.mapping_results
-        else output_dir / f"mapping_results_bowtie_{args.mapping_tag}.csv"
+        else default_mapping_results
     )
-    return {
+    config = {
         "output_dir": output_dir,
+        "layout": layout,
         "threads": args.threads_per_sample,
         "adapter": args.adapter,
         "umi_flag": args.umi_flag,
@@ -181,6 +238,8 @@ def build_config(args):
         "resume": args.resume,
         "dry_run": args.dry_run,
     }
+    config.update(paths)
+    return config
 
 
 def main(argv=None):
@@ -189,11 +248,12 @@ def main(argv=None):
     try:
         steps = parse_steps(args.steps)
         config = build_config(args)
-        samples = build_samples(args, steps, config["output_dir"])
+        samples = build_samples(args, steps, config)
         preflight(args, steps, config)
         if not args.dry_run:
             config["output_dir"].mkdir(parents=True, exist_ok=True)
         logging.info("Samples (%d): %s", len(samples), ", ".join(item[0] for item in samples))
+        logging.info("Output layout: %s", config["layout"])
         logging.info("Steps: %s; jobs=%d; threads/sample=%d",
                      ", ".join(steps), args.jobs, args.threads_per_sample)
 
@@ -208,7 +268,7 @@ def main(argv=None):
             elif step == "srna":
                 srna.run(samples, config, args.jobs)
             elif step == "mapping_summary":
-                input_dir = config["output_dir"] / args.mapping_tag
+                input_dir = config["srna_mapping_dir"]
                 if args.dry_run:
                     logging.info("Would summarize mapping logs: %s -> %s",
                                  input_dir, config["mapping_results"])

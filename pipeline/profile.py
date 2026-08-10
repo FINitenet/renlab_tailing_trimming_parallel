@@ -131,10 +131,9 @@ def _summarize_profile(profile_file, summary_file):
 
 def run_sample(item, config):
     sample, _ = item
-    output_dir = Path(config["output_dir"])
-    sam_file = output_dir / "3_remapping" / sample / "merged-alignment-sorted.sam"
-    profile_dir = output_dir / "4_163.results"
-    summary_dir = output_dir / "5_GMC_analysis"
+    sam_file = Path(config["remapping_dir"]) / sample / "merged-alignment-sorted.sam"
+    profile_dir = Path(config["profile_dir"])
+    summary_dir = Path(config["gmc_dir"])
     profile_file = profile_dir / f"{sample}.txt"
     summary_file = profile_dir / f"{sample}.summary.txt"
     gmc_file = summary_dir / f"{sample}.5GMC"
@@ -149,7 +148,7 @@ def run_sample(item, config):
     profile_dir.mkdir(parents=True, exist_ok=True)
     summary_dir.mkdir(parents=True, exist_ok=True)
     _make_profile_and_5gmc(config["meta_file"], sam_file, profile_file, gmc_file,
-                           summary_dir / "doc_seqlogo", sample)
+                           Path(config["seqlogo_dir"]), sample)
     _summarize_profile(profile_file, summary_file)
     _split_profile(profile_file, profile_dir, sample)
     logging.info("[%s] profile complete", sample)

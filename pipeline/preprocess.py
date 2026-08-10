@@ -34,9 +34,8 @@ def _run_bowtie(command, log_handle, dry_run):
 
 def run_sample(item, config):
     sample, input_file = item
-    output_dir = Path(config["output_dir"])
-    format_dir = output_dir / "2_formmat_fasta"
-    remapping_root = output_dir / "3_remapping"
+    format_dir = Path(config["format_dir"])
+    remapping_root = Path(config["remapping_dir"])
     remapping_dir = remapping_root / sample
     threads = config["threads"]
     dry_run = config["dry_run"]

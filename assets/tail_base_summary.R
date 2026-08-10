@@ -11,11 +11,11 @@ library(lubridate)
 args <- commandArgs(trailingOnly = T)
 
 sample <- args[1]
-input_path <- args[2]
-
-doc_path <- paste0(input_path, "/5_GMC_analysis/doc/", sample,"/")
-plot_path <- paste0(input_path, "/5_GMC_analysis/plot/", sample,"/")
-bin_path <- paste0(input_path, "/5_GMC_analysis/bin/")
+gmc_file <- args[2]
+profile_summary_file <- args[7]
+doc_path <- paste0(args[8], "/")
+plot_path <- paste0(args[9], "/")
+bin_path <- paste0(args[10], "/")
 
 dir.create(doc_path, recursive = TRUE, showWarnings = FALSE)
 dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
@@ -117,7 +117,7 @@ if (length(total) != 1) {
               "', found ", length(total)))
 }
 
-df <- fread(paste0(input_path, "/5_GMC_analysis/", sample, ".5GMC"), header = TRUE)
+df <- fread(gmc_file, header = TRUE)
 df <- df[, -c(3, 4)]
 df1 <- separate(df, RNAME, into = c("sample", "rank", "raw_seq", "base"), sep = "-+", convert = TRUE,remove = FALSE)
 df1$raw_len <- nchar(df1$raw_seq)
@@ -156,7 +156,7 @@ for (nt in 1:10) {
     tmp_1_summary2 <- spread(tmp_1_summary[c(1:2, 4)], key = tail_base, value = percentage, fill = 0) %>% ensure_base_columns() %>%
       dplyr::rename("A_percentage"=A, "C_percentage"=C, "G_percentage"=G, "T_percentage"=T)
 
-    tmp_summary <- fread(paste0(input_path, "/4_163.results/", sample, ".summary.txt"), header = TRUE)
+    tmp_summary <- fread(profile_summary_file, header = TRUE)
     tmp_summary <- tmp_summary %>%
       select("# ID", SUM, tail_1) %>%
       mutate("miRNA_tail_1/miRNA_total" = round(tail_1 / SUM * 100, 4))
@@ -196,7 +196,7 @@ for (nt in 1:10) {
       ungroup() %>%
       mutate(global_percentage = round(((count / sum(count)) * 100), 4))
 
-    tmp_summary <- fread(paste0(input_path, "/4_163.results/", sample, ".summary.txt"), header = TRUE)
+    tmp_summary <- fread(profile_summary_file, header = TRUE)
     tmp_summary <- tmp_summary %>%
       left_join( ma, by = c("# ID" = "V1")) %>%
       select("# ID", short_mechanism = V2, SUM, tail = paste0("tail_", nt)) %>% mutate(!!paste0("miRNA_tail_", nt, "/miRNA_total") := round( tail / SUM * 100, 4))

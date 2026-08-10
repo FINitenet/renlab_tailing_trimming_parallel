@@ -98,10 +98,9 @@ def _map_reads(trimmed_fastq, mapping_dir, sample, config):
 
 def run_sample(item, config):
     sample, input_file = item
-    output_dir = Path(config["output_dir"])
-    trim_dir = output_dir / "2_trim_adapter"
-    umi_dir = output_dir / "3_extract_umi"
-    mapping_dir = output_dir / "4_mapping"
+    trim_dir = Path(config["srna_trim_dir"])
+    umi_dir = Path(config["srna_umi_dir"])
+    mapping_dir = Path(config["srna_mapping_dir"])
     dry_run = config["dry_run"]
     marker = mapping_dir / f"{sample}.mapresults.txt"
     if config["resume"] and marker.is_file():

@@ -12,6 +12,7 @@ def _first_integer(line):
 
 
 def summarize(input_dir, output_file):
+    output_file = Path(output_file)
     rows = []
     for log_file in sorted(Path(input_dir).glob("*.mapresults.txt")):
         values = {}
@@ -36,5 +37,6 @@ def summarize(input_dir, output_file):
     if not rows:
         raise FileNotFoundError(f"No '*.mapresults.txt' files found in {input_dir}")
     result = pd.DataFrame(rows)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     result.to_csv(output_file, index=False, sep="\t")
     return result

@@ -21,9 +21,8 @@ def _build_end_matrix(meta_file):
 
 def run_sample(item, config):
     sample, _ = item
-    output_dir = Path(config["output_dir"])
-    sam_file = output_dir / "3_remapping" / sample / "merged-alignment-sorted.sam"
-    output_file = output_dir / f"{sample}_len_dist.xlsx"
+    sam_file = Path(config["remapping_dir"]) / sample / "merged-alignment-sorted.sam"
+    output_file = Path(config["length_dir"]) / f"{sample}_len_dist.xlsx"
     if config["resume"] and output_file.is_file():
         logging.info("[%s] length distribution already complete; skipping", sample)
         return
@@ -55,6 +54,7 @@ def run_sample(item, config):
                 total += 1
             seen.add(query_id)
 
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     workbook = Workbook()
     total_sheet = workbook.active
     total_sheet.title = "total reads mapped to miRNA"
