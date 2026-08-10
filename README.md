@@ -7,7 +7,7 @@
 
 | 项目 | 原版本 | 新版本 |
 | --- | --- | --- |
-| 项目结构 | 运行时引用 `TRMRNAseqTools/0_workflow_for_srna_seq.py` 等外部脚本 | 已将相关逻辑、R 脚本和小型参考表整合到本仓库，可独立迁移和维护 |
+| 项目结构 | 运行时引用 `TRMRNAseqTools/0_workflow_for_srna_seq.py` 等外部脚本 | 已将相关逻辑和 R 脚本整合到本仓库；参考表放在本地 `resources/`，不由 Git 跟踪 |
 | 多样本运行 | 主要按样本串行处理 | 使用 `--jobs` 控制样本级并行，可同时处理多个样本 |
 | 资源控制 | 工具线程数分散在不同脚本中 | 使用 `--threads-per-sample` 统一控制单样本线程数，总线程数约为 `jobs × threads-per-sample` |
 | profile 统计 | Perl 针对每条 miRNA 重复扫描 SAM，共进行 538 次全文件扫描 | Python 单遍扫描 SAM，同时生成 profile、summary 和 5GMC 结果 |
@@ -40,9 +40,11 @@ python3 main.py -i 1_rawdata -o results --jobs 2 --threads-per-sample 8
 
 ### 独立性和可复现性
 
-原流程引用的外部小 RNA workflow、统计逻辑、R 脚本和小型运行期数据已经纳入当前
-仓库。复制或克隆本仓库后，不再需要保持原服务器上的脚本目录结构。Bowtie 索引体积
-较大，仍作为外部参考数据通过命令行参数指定，不提交到 Git 仓库。
+原流程引用的外部小 RNA workflow、统计逻辑和 R 脚本已经纳入当前仓库，不再需要
+保持原服务器上的脚本目录结构。`resources/` 已加入 `.gitignore`，服务器本地文件会
+保留，但不会上传到 GitHub；新环境需要自行准备这些参考表，或分别通过
+`--meta-file`、`--mechanism-file` 和 `--sequence-merge-file` 指定。Bowtie 索引体积
+较大，同样作为外部参考数据通过命令行参数指定，不提交到 Git 仓库。
 
 流程已完成 Python/R 语法检查、dry-run 检查、双样本并行测试，以及长度分布和
 tail-base 汇总测试。上述测试用于确认调度、续跑和主要输出生成逻辑可以正常工作；
@@ -106,7 +108,7 @@ UMI 文库使用 `--umi-flag 1`，普通小 RNA 文库使用默认值 `2`。
 main.py                 统一入口和步骤调度
 pipeline/               Python 实现；样本级受控并行
 assets/tail_base_summary.R  本地 R 汇总脚本
-resources/              R/Python 所需的小型参考表
+resources/              R/Python 所需的本地参考表（Git 忽略）
 requirements.txt        Python 依赖
 ```
 
