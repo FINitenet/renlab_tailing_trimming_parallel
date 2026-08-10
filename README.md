@@ -40,6 +40,7 @@ flowchart TD
     D --> D1[11 × 11 trimming–tailing profile]
     D --> D2[5GMC reads 与 sequence-logo 输入]
     D --> D3[全长 reads 与 5GMC 长度分布]
+    D1 --> D4[每个 miRNA 一页的<br/>多样本气泡矩阵图]
 
     B --> E1{文库类型}
     E1 -->|常规文库| E2[接头过滤]
@@ -58,6 +59,7 @@ flowchart TD
 ### 主要输出
 
 - 每条 miRNA 的 11 × 11 trimming–tailing profile
+- 多样本并排的 trimming–tailing 气泡矩阵多页 PDF
 - miRNA 总 reads、1–10 nt 加尾及剪切事件的汇总统计
 - 5GMC reads 及 sequence-logo 输入文件
 - 全长 reads 和 5GMC 的长度分布工作簿
@@ -147,16 +149,31 @@ python3 main.py -i 1_rawdata -o results --suffix _R1.fastq.gz
 1. `preprocess`：接头过滤以及 miRNA tailing/trimming remapping
 2. `profile`：单遍扫描 SAM，生成 163 profile 和 5GMC 汇总；替代旧版对每条
    miRNA 重读一次 SAM 的 Perl 实现
-3. `srna`：常规或 UMI 小 RNA genome mapping
-4. `mapping_summary`：汇总 Bowtie 日志
-5. `length`：生成每个样本的长度分布工作簿
-6. `tailbase`：生成 tail base R 统计和图表
+3. `bubble`：将全部样本并排绘制为 trimming–tailing 气泡矩阵，每个 miRNA 一页
+4. `srna`：常规或 UMI 小 RNA genome mapping
+5. `mapping_summary`：汇总 Bowtie 日志
+6. `length`：生成每个样本的长度分布工作簿
+7. `tailbase`：生成 tail base R 统计和图表
 
 例如只运行前两个步骤：
 
 ```bash
 python3 main.py -i 1_rawdata -o results --steps preprocess,profile -j 2
 ```
+
+已有 profile 结果时，可单独生成类似 `new.pdf` 的多页气泡图：
+
+```bash
+python3 main.py \
+  -o results \
+  --steps bubble \
+  --filelist filelist \
+  --bubble-cols 2
+```
+
+默认输出为
+`5_GMC_analysis/plot_bubble/tailing_trimming_bubble.pdf`。`--bubble-cols` 控制每行
+显示的样本数，`--bubble-output` 可指定 PDF 路径。
 
 从已有 `3_remapping/<sample>/` 继续运行时，可以省略原始 FASTQ，或用
 `--filelist` 指定样本。`--resume` 会根据每一步的最终输出跳过已完成样本；
@@ -169,6 +186,7 @@ UMI 文库使用 `--umi-flag 1`，普通小 RNA 文库使用默认值 `2`。
 ```text
 main.py                 统一入口和步骤调度
 pipeline/               Python 实现；样本级受控并行
+pipeline/bubble.py      多样本 trimming–tailing 气泡矩阵图
 assets/tail_base_summary.R  本地 R 汇总脚本
 resources/              R/Python 所需的本地参考表（Git 忽略）
 requirements.txt        Python 依赖

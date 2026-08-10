@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-from pipeline import length, mapping_summary, preprocess, profile, srna, tailbase
+from pipeline import bubble, length, mapping_summary, preprocess, profile, srna, tailbase
 from pipeline.common import (
     discover_fastqs,
     require_bowtie_index,
@@ -30,9 +30,10 @@ DEFAULT_GENOME = (
     "ath_chr_bowtie_index/Arabidopsis_thaliana.TAIR10.dna.toplevel"
 )
 DEFAULT_RSCRIPT = "/usr/local/bin/Rscript"
-STEP_ORDER = ("preprocess", "profile", "srna", "mapping_summary", "length", "tailbase")
+STEP_ORDER = ("preprocess", "profile", "bubble", "srna", "mapping_summary", "length", "tailbase")
 STEP_ALIASES = {
     "preprocess": "preprocess", "profile": "profile", "srna": "srna",
+    "bubble": "bubble", "bubble_plot": "bubble",
     "srna_workflow": "srna", "mapping": "mapping_summary",
     "mapping_summary": "mapping_summary", "length": "length",
     "length_dist": "length", "tailbase": "tailbase", "tail_base": "tailbase",
@@ -65,6 +66,10 @@ def parse_args(argv=None):
     parser.add_argument("--sequence-merge-file", default=str(RESOURCES / "miRNA_sequence_merge.txt"))
     parser.add_argument("--rscript", default=DEFAULT_RSCRIPT,
                         help=f"Rscript executable used by tailbase (default: {DEFAULT_RSCRIPT})")
+    parser.add_argument("--bubble-output", default=None,
+                        help="multi-page bubble plot PDF; default: <output>/5_GMC_analysis/plot_bubble/tailing_trimming_bubble.pdf")
+    parser.add_argument("--bubble-cols", type=int, default=2,
+                        help="number of sample panels per row in the bubble plot (default: 2)")
     parser.add_argument("--mapping-tag", default="4_mapping")
     parser.add_argument("--mapping-results", default=None,
                         help="mapping summary table; default: <output>/mapping_results_bowtie_<tag>.csv")
@@ -116,7 +121,7 @@ def _discover_existing_samples(output_dir):
 
 
 def build_samples(args, steps, output_dir):
-    if not set(steps).intersection({"preprocess", "profile", "srna", "length", "tailbase"}):
+    if not set(steps).intersection({"preprocess", "profile", "bubble", "srna", "length", "tailbase"}):
         return []
     if args.filelist:
         return _read_filelist(Path(args.filelist).expanduser().resolve())
@@ -133,8 +138,8 @@ def build_samples(args, steps, output_dir):
 def preflight(args, steps, config):
     for key in ("meta_file", "tailbase_script", "mechanism_file", "sequence_merge_file"):
         require_file(config[key], key.replace("_", " "))
-    if args.jobs < 1 or args.threads_per_sample < 1:
-        raise ValueError("--jobs and --threads-per-sample must be at least 1")
+    if args.jobs < 1 or args.threads_per_sample < 1 or args.bubble_cols < 1:
+        raise ValueError("--jobs, --threads-per-sample, and --bubble-cols must be at least 1")
     if "preprocess" in steps:
         config["trim_galore"] = require_executable("trim_galore")
         config["bowtie"] = require_executable("bowtie")
@@ -150,6 +155,10 @@ def preflight(args, steps, config):
 
 def build_config(args):
     output_dir = Path(args.output).expanduser().resolve()
+    bubble_output = (
+        Path(args.bubble_output).expanduser().resolve() if args.bubble_output
+        else output_dir / "5_GMC_analysis" / "plot_bubble" / "tailing_trimming_bubble.pdf"
+    )
     mapping_results = (
         Path(args.mapping_results).expanduser().resolve() if args.mapping_results
         else output_dir / f"mapping_results_bowtie_{args.mapping_tag}.csv"
@@ -166,6 +175,8 @@ def build_config(args):
         "mechanism_file": Path(args.mechanism_file).expanduser().resolve(),
         "sequence_merge_file": Path(args.sequence_merge_file).expanduser().resolve(),
         "tailbase_script": ASSETS / "tail_base_summary.R",
+        "bubble_output": bubble_output,
+        "bubble_cols": args.bubble_cols,
         "mapping_results": mapping_results,
         "resume": args.resume,
         "dry_run": args.dry_run,
@@ -192,6 +203,8 @@ def main(argv=None):
                 preprocess.run(samples, config, args.jobs)
             elif step == "profile":
                 profile.run(samples, config, args.jobs)
+            elif step == "bubble":
+                bubble.run(samples, config)
             elif step == "srna":
                 srna.run(samples, config, args.jobs)
             elif step == "mapping_summary":
