@@ -24,6 +24,37 @@ mapping statistics 汇总、全长 reads 与 5GMC 长度分布，以及 tail-bas
 仓库，并以单遍 SAM 扫描替代重复扫描策略。Bowtie 索引及 `resources/` 参考表作为
 本地参考数据单独提供，不纳入 Git 版本管理。
 
+### 分析流程
+
+```mermaid
+flowchart TD
+    A[单端 small RNA-seq FASTQ] --> B[样本识别与并行调度]
+
+    B --> C1[接头与低质量序列过滤<br/>Q ≥ 20，长度 12–30 nt]
+    C1 --> C2[tRNA/snoRNA 精确比对<br/>去除潜在污染 reads]
+    C2 --> C3[miRNA hairpin 精确比对]
+    C3 -->|直接比对成功| C5[合并并标准化比对结果]
+    C3 -->|未比对 reads| C4[从 3′ 端依次剪除 1–10 nt<br/>每轮重新比对 miRNA hairpin]
+    C4 --> C5
+    C5 --> D[单遍扫描 SAM]
+    D --> D1[11 × 11 trimming–tailing profile]
+    D --> D2[5GMC reads 与 sequence-logo 输入]
+    D --> D3[全长 reads 与 5GMC 长度分布]
+
+    B --> E1{文库类型}
+    E1 -->|常规文库| E2[接头过滤]
+    E1 -->|UMI 文库| E3[UMI 提取、合并与计数]
+    E1 -->|UMI 文库| E2
+    E3 --> E7[UMI reads 基因组比对<br/>及长度分布]
+    E2 --> E4[筛选 18–28 nt reads]
+    E4 --> E5[基因组精确比对]
+    E5 --> E6[Mapping statistics]
+
+    D1 --> F[Tail-base 统计与可视化]
+    D2 --> F
+    E6 --> F
+```
+
 ### 主要输出
 
 - 每条 miRNA 的 11 × 11 trimming–tailing profile
