@@ -29,6 +29,7 @@ DEFAULT_GENOME = (
     "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
     "ath_chr_bowtie_index/Arabidopsis_thaliana.TAIR10.dna.toplevel"
 )
+DEFAULT_RSCRIPT = "/usr/local/bin/Rscript"
 STEP_ORDER = ("preprocess", "profile", "srna", "mapping_summary", "length", "tailbase")
 STEP_ALIASES = {
     "preprocess": "preprocess", "profile": "profile", "srna": "srna",
@@ -62,6 +63,8 @@ def parse_args(argv=None):
     parser.add_argument("--meta-file", default=str(RESOURCES / "miRNA_start_sequence_length.txt"))
     parser.add_argument("--mechanism-file", default=str(RESOURCES / "ath_miRNA_Mechanism_hairpin.txt"))
     parser.add_argument("--sequence-merge-file", default=str(RESOURCES / "miRNA_sequence_merge.txt"))
+    parser.add_argument("--rscript", default=DEFAULT_RSCRIPT,
+                        help=f"Rscript executable used by tailbase (default: {DEFAULT_RSCRIPT})")
     parser.add_argument("--mapping-tag", default="4_mapping")
     parser.add_argument("--mapping-results", default=None,
                         help="mapping summary table; default: <output>/mapping_results_bowtie_<tag>.csv")
@@ -142,7 +145,7 @@ def preflight(args, steps, config):
         config["bowtie"] = require_executable("bowtie")
         require_bowtie_index(args.genome_index)
     if "tailbase" in steps:
-        config["rscript"] = require_executable("Rscript")
+        config["rscript"] = require_executable(args.rscript)
 
 
 def build_config(args):

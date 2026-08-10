@@ -117,6 +117,7 @@ tail-base 汇总测试。上述测试用于确认调度、续跑和主要输出�
 - Python 包见 `requirements.txt`
 - 命令行工具：`trim_galore`、`bowtie`、`Rscript`
 - R 包：`tidyverse`、`openxlsx`、`data.table`、`reshape2`、`lubridate`
+- tail-base 默认使用旧流程中的 `/usr/local/bin/Rscript`；可通过 `--rscript` 覆盖
 - Bowtie 索引仍属于大型参考数据，通过参数指定，不复制进代码目录
 
 ## 快速开始
