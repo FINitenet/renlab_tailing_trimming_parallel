@@ -16,8 +16,9 @@ trimming–tailing profile，并进一步统计 5GMC、末端碱基类型和长�
 
 除 miRNA 末端修饰分析外，本流程还提供常规及 UMI small RNA 文库的基因组比对、
 mapping statistics 汇总、全长 reads 与 5GMC 长度分布，以及 tail-base 统计表和
-可视化结果。样本级并行调度与单样本线程控制相互独立，可用于多样本 small RNA-seq
-项目的批量分析。
+可视化结果。流程还可利用 ShortStack 对 18–28 nt reads 进行零错配基因组定位和
+多重比对分配，再通过 featureCounts 与 GFF3 biotype 注释计算文库 RNA type 组成。
+样本级并行调度与单样本线程控制相互独立，可用于多样本 small RNA-seq 项目的批量分析。
 
 本项目由 `renlab_tailing_trimming_20240111` 重构而来。在保持核心统计定义和主要
 分析参数不变的基础上，将原先分散于多个目录的 Python 和 R 分析逻辑整合到当前
@@ -50,6 +51,9 @@ flowchart TD
     E2 --> E4[筛选 18–28 nt reads]
     E4 --> E5[基因组精确比对]
     E5 --> E6[Mapping statistics]
+    E4 --> E8[ShortStack 零错配基因组定位<br/>多重比对 reads 分配]
+    E8 --> E9[featureCounts biotype 注释]
+    E9 --> E10[RNA type 优先级分类<br/>组成与长度分布图]
 
     D1 --> F[Tail-base 统计与可视化]
     D2 --> F
@@ -65,6 +69,7 @@ flowchart TD
 - 全长 reads 和 5GMC 的长度分布工作簿及样本级双面板 PDF
 - 不同末端碱基及修饰长度的计数、比例和 RPM 结果
 - 常规或 UMI small RNA 的基因组比对结果及 mapping statistics
+- ShortStack 定位后的 RNA type 计数、比例、长度分布及多样本组成图
 
 ## 相比原版本的提升
 
@@ -117,7 +122,7 @@ tail-base 汇总测试。上述测试用于确认调度、续跑和主要输出�
 
 - Python 3.8+
 - Python 包见 `requirements.txt`
-- 命令行工具：`trim_galore`、`bowtie`、`Rscript`
+- 命令行工具：`trim_galore`、`bowtie`、`ShortStack`、`featureCounts`、`Rscript`
 - R 包：`tidyverse`、`openxlsx`、`data.table`、`reshape2`、`lubridate`
 - tail-base 默认使用旧流程中的 `/usr/local/bin/Rscript`；可通过 `--rscript` 覆盖
 - Bowtie 索引仍属于大型参考数据，通过参数指定，不复制进代码目录
@@ -171,7 +176,15 @@ project_output/
     │       ├── plots/<sample>/
     │       └── workspace/
     └── srna/
-        └── mapping_summary.tsv
+        ├── mapping_summary.tsv
+        └── rnatype/
+            ├── rnatype_summary.tsv
+            ├── rnatype_summary.xlsx
+            ├── tables/<sample>_rnatype_by_length.tsv
+            └── plots/
+                ├── rnatype_composition.pdf
+                ├── rnatype_composition.png
+                └── <sample>_rnatype_by_length.pdf
 ```
 
 `--layout auto` 是默认设置：新项目采用上述结构；如果检测到旧版的
@@ -188,8 +201,9 @@ project_output/
 3. `bubble`：将全部样本并排绘制为 trimming–tailing 气泡矩阵，每个 miRNA 一页
 4. `srna`：常规或 UMI 小 RNA genome mapping
 5. `mapping_summary`：汇总 Bowtie 日志
-6. `length`：生成每个样本的全长 reads 与 5GMC 长度分布工作簿及 PDF 图
-7. `tailbase`：生成 tail base R 统计和图表
+6. `rnatype`：ShortStack 定位、featureCounts biotype 注释及 RNA type 分布绘图
+7. `length`：生成每个样本的全长 reads 与 5GMC 长度分布工作簿及 PDF 图
+8. `tailbase`：生成 tail base R 统计和图表
 
 例如只运行前两个步骤：
 
@@ -224,12 +238,37 @@ FASTQ，或用 `--filelist` 指定样本。旧目录通过 `--layout legacy` 继
 
 UMI 文库使用 `--umi-flag 1`，普通小 RNA 文库使用默认值 `2`。
 
+### RNA type 分类
+
+`rnatype` 步骤复用 `srna` 步骤产生的 18–28 nt FASTQ。ShortStack 使用零错配、
+`mmap=u`、`bowtie_m=1000` 和 `ranmax=50`，与旧版 `0_workflow.sh` 保持一致；随后
+featureCounts 使用 GFF3 中 `gene,ncRNA_gene` 的 `biotype` 属性进行注释。重叠注释按
+miRNA primary transcript、phasi/tasiRNA、hc-siRNA、transposable element、lncRNA、
+protein-coding、snoRNA、snRNA、rRNA、tRNA 的顺序确定唯一 RNA type。未比对到基因组的
+reads 不进入分母；已比对但没有匹配注释的 reads 归入 `unassigned`。
+
+```bash
+python3 main.py \
+  -i 1_rawdata \
+  -o project_output \
+  --steps srna,rnatype \
+  --jobs 2 \
+  --threads-per-sample 8
+```
+
+如果 `srna` 的长度过滤结果已经存在，可只运行 `--steps rnatype --resume`。默认参考为
+TAIR10，可通过 `--genome-fasta` 和 `--rnatype-annotation` 替换。featureCounts 默认沿用
+旧流程的非链特异设置 `--rnatype-stranded 0`；若文库方向已通过实验设计或独立检查确认，
+可设置为 `1`（正向）或 `2`（反向）。自定义 RNA type 重叠优先级可通过
+`--rnatype-priority` 指定，每行一个类别、由上到下优先级递减。
+
 ## 目录内容
 
 ```text
 main.py                 统一入口和步骤调度
 pipeline/               Python 实现；样本级受控并行
 pipeline/bubble.py      多样本 trimming–tailing 气泡矩阵图
+pipeline/rnatype.py     ShortStack/featureCounts RNA type 分类与绘图
 assets/tail_base_summary.R  本地 R 汇总脚本
 resources/              R/Python 所需的本地参考表（Git 忽略）
 requirements.txt        Python 依赖

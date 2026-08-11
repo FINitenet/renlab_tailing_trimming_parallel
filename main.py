@@ -4,7 +4,7 @@ import logging
 import sys
 from pathlib import Path
 
-from pipeline import bubble, length, mapping_summary, preprocess, profile, srna, tailbase
+from pipeline import bubble, length, mapping_summary, preprocess, profile, rnatype, srna, tailbase
 from pipeline.common import (
     discover_fastqs,
     require_bowtie_index,
@@ -29,13 +29,28 @@ DEFAULT_GENOME = (
     "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
     "ath_chr_bowtie_index/Arabidopsis_thaliana.TAIR10.dna.toplevel"
 )
+DEFAULT_GENOME_FASTA = DEFAULT_GENOME + ".fa"
+DEFAULT_RNATYPE_ANNOTATION = (
+    "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
+    "Arabidopsis_thaliana.TAIR10.53.md.gff3"
+)
+DEFAULT_SHORTSTACK = "/bios-store1/chenyc/scripts/Github_scripts/ShortStack3/ShortStack"
+ENV_FEATURECOUNTS = Path(sys.executable).resolve().parent / "featureCounts"
+SERVER_FEATURECOUNTS = Path("/home/chenyc/miniforge3/envs/bioinfo/bin/featureCounts")
+DEFAULT_FEATURECOUNTS = str(next(
+    (path for path in (ENV_FEATURECOUNTS, SERVER_FEATURECOUNTS) if path.is_file()),
+    Path("featureCounts"),
+))
 DEFAULT_RSCRIPT = "/usr/local/bin/Rscript"
-STEP_ORDER = ("preprocess", "profile", "bubble", "srna", "mapping_summary", "length", "tailbase")
+STEP_ORDER = (
+    "preprocess", "profile", "bubble", "srna", "mapping_summary", "rnatype", "length", "tailbase"
+)
 STEP_ALIASES = {
     "preprocess": "preprocess", "profile": "profile", "srna": "srna",
     "bubble": "bubble", "bubble_plot": "bubble",
     "srna_workflow": "srna", "mapping": "mapping_summary",
     "mapping_summary": "mapping_summary", "length": "length",
+    "rnatype": "rnatype", "rna_type": "rnatype", "rna-type": "rnatype",
     "length_dist": "length", "tailbase": "tailbase", "tail_base": "tailbase",
 }
 
@@ -63,6 +78,18 @@ def parse_args(argv=None):
                         help="tRNA/snoRNA Bowtie index prefix")
     parser.add_argument("--genome-index", default=DEFAULT_GENOME,
                         help="genome Bowtie index prefix")
+    parser.add_argument("--genome-fasta", default=DEFAULT_GENOME_FASTA,
+                        help="genome FASTA used by ShortStack")
+    parser.add_argument("--rnatype-annotation", default=DEFAULT_RNATYPE_ANNOTATION,
+                        help="GFF3 containing gene/ncRNA_gene biotype attributes")
+    parser.add_argument("--rnatype-priority", default=None,
+                        help="optional RNA-type priority file, one category per line")
+    parser.add_argument("--rnatype-stranded", type=int, choices=(0, 1, 2), default=0,
+                        help="featureCounts strand mode: 0 unstranded, 1 forward, 2 reverse")
+    parser.add_argument("--shortstack", default=DEFAULT_SHORTSTACK,
+                        help="ShortStack executable")
+    parser.add_argument("--featurecounts", default=DEFAULT_FEATURECOUNTS,
+                        help=f"featureCounts executable (default: {DEFAULT_FEATURECOUNTS})")
     parser.add_argument("--meta-file", default=str(RESOURCES / "miRNA_start_sequence_length.txt"))
     parser.add_argument("--mechanism-file", default=str(RESOURCES / "ath_miRNA_Mechanism_hairpin.txt"))
     parser.add_argument("--sequence-merge-file", default=str(RESOURCES / "miRNA_sequence_merge.txt"))
@@ -123,7 +150,9 @@ def _discover_existing_samples(remapping):
 
 
 def build_samples(args, steps, config):
-    if not set(steps).intersection({"preprocess", "profile", "bubble", "srna", "length", "tailbase"}):
+    if not set(steps).intersection(
+        {"preprocess", "profile", "bubble", "srna", "rnatype", "length", "tailbase"}
+    ):
         return []
     if args.filelist:
         return _read_filelist(Path(args.filelist).expanduser().resolve())
@@ -154,6 +183,13 @@ def preflight(args, steps, config):
         config["trim_galore"] = require_executable("trim_galore")
         config["bowtie"] = require_executable("bowtie")
         require_bowtie_index(args.genome_index)
+    if "rnatype" in steps:
+        config["shortstack"] = require_executable(args.shortstack)
+        config["featurecounts"] = require_executable(args.featurecounts)
+        require_file(config["genome_fasta"], "ShortStack genome FASTA")
+        require_file(config["rnatype_annotation"], "RNA-type GFF3 annotation")
+        if config["rnatype_priority"] is not None:
+            require_file(config["rnatype_priority"], "RNA-type priority file")
     if "tailbase" in steps:
         config["rscript"] = require_executable(args.rscript)
 
@@ -189,6 +225,9 @@ def build_config(args):
             "srna_trim_dir": srna_work / "trimmed",
             "srna_umi_dir": srna_work / "umi",
             "srna_mapping_dir": srna_work / "genome_mapping",
+            "rnatype_shortstack_dir": srna_work / "rnatype" / "shortstack",
+            "rnatype_annotation_dir": srna_work / "rnatype" / "featurecounts",
+            "rnatype_results_dir": srna_results / "rnatype",
         }
         default_bubble = tt_results / "bubble" / "tailing_trimming_bubble.pdf"
         default_mapping_results = srna_results / "mapping_summary.tsv"
@@ -207,6 +246,9 @@ def build_config(args):
             "srna_trim_dir": output_dir / "2_trim_adapter",
             "srna_umi_dir": output_dir / "3_extract_umi",
             "srna_mapping_dir": output_dir / "4_mapping",
+            "rnatype_shortstack_dir": output_dir / "6_RNA_type_analysis" / "work" / "shortstack",
+            "rnatype_annotation_dir": output_dir / "6_RNA_type_analysis" / "work" / "featurecounts",
+            "rnatype_results_dir": output_dir / "6_RNA_type_analysis" / "results",
         }
         default_bubble = summary_dir / "plot_bubble" / "tailing_trimming_bubble.pdf"
         default_mapping_results = output_dir / f"mapping_results_bowtie_{args.mapping_tag}.csv"
@@ -228,6 +270,12 @@ def build_config(args):
         "mir_hairpin": args.mir_hairpin,
         "trsno": args.trsno,
         "genome_index": args.genome_index,
+        "genome_fasta": Path(args.genome_fasta).expanduser().resolve(),
+        "rnatype_annotation": Path(args.rnatype_annotation).expanduser().resolve(),
+        "rnatype_priority": (
+            Path(args.rnatype_priority).expanduser().resolve() if args.rnatype_priority else None
+        ),
+        "rnatype_stranded": args.rnatype_stranded,
         "meta_file": Path(args.meta_file).expanduser().resolve(),
         "mechanism_file": Path(args.mechanism_file).expanduser().resolve(),
         "sequence_merge_file": Path(args.sequence_merge_file).expanduser().resolve(),
@@ -275,6 +323,8 @@ def main(argv=None):
                 else:
                     result = mapping_summary.summarize(input_dir, config["mapping_results"])
                     logging.info("Mapping summary contains %d samples", len(result))
+            elif step == "rnatype":
+                rnatype.run(samples, config, args.jobs)
             elif step == "length":
                 length.run(samples, config, args.jobs)
             elif step == "tailbase":
