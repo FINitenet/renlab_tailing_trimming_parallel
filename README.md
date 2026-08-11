@@ -62,7 +62,7 @@ flowchart TD
 - 多样本并排的 trimming–tailing 气泡矩阵多页 PDF
 - miRNA 总 reads、1–10 nt 加尾及剪切事件的汇总统计
 - 5GMC reads 及 sequence-logo 输入文件
-- 全长 reads 和 5GMC 的长度分布工作簿
+- 全长 reads 和 5GMC 的长度分布工作簿及样本级双面板 PDF
 - 不同末端碱基及修饰长度的计数、比例和 RPM 结果
 - 常规或 UMI small RNA 的基因组比对结果及 mapping statistics
 
@@ -163,6 +163,8 @@ project_output/
     │   ├── 5gmc/
     │   ├── sequence_logo/
     │   ├── length/
+    │   │   ├── <sample>_len_dist.xlsx
+    │   │   └── plots/<sample>_length_distribution.pdf
     │   ├── bubble/tailing_trimming_bubble.pdf
     │   └── tailbase/
     │       ├── tables/<sample>/
@@ -186,7 +188,7 @@ project_output/
 3. `bubble`：将全部样本并排绘制为 trimming–tailing 气泡矩阵，每个 miRNA 一页
 4. `srna`：常规或 UMI 小 RNA genome mapping
 5. `mapping_summary`：汇总 Bowtie 日志
-6. `length`：生成每个样本的长度分布工作簿
+6. `length`：生成每个样本的全长 reads 与 5GMC 长度分布工作簿及 PDF 图
 7. `tailbase`：生成 tail base R 统计和图表
 
 例如只运行前两个步骤：
@@ -213,6 +215,12 @@ python3 main.py \
 FASTQ，或用 `--filelist` 指定样本。旧目录通过 `--layout legacy` 继续支持。
 `--resume` 会根据每一步的最终输出跳过已完成样本；
 `--dry-run` 用于检查样本、参数、索引和即将执行的命令。
+
+长度分析工作簿包含 `total reads mapped to miRNA`、`distribution of whole reads` 和
+`distribution of 5GMC` 三个工作表。首页同时嵌入全长 reads 与 5GMC 的长度分布图；
+两个数据工作表分别保存长度、read 数和占总 miRNA mapped reads 的比例。独立 PDF 位于
+`results/tailing_trimming/length/plots/`。对于旧版本已经生成的工作簿，使用
+`--steps length --resume` 可直接读取现有统计并补充 Excel 图表和 PDF，无需重新扫描 SAM。
 
 UMI 文库使用 `--umi-flag 1`，普通小 RNA 文库使用默认值 `2`。
 
