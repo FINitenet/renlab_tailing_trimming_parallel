@@ -191,27 +191,85 @@ project_output/
 `3_remapping/` 或 `4_163.results/`，则继续使用原目录，避免重复计算。也可以显式
 使用 `--layout organized` 或 `--layout legacy`。
 
-## 分步运行
+## 分步运行、功能与结果解读
 
-步骤顺序为：
+流程可拆分为 8 个步骤。下表中的“直接图形”仅表示该步骤本身是否产图；不直接产图的
+步骤通常生成后续统计和绘图所需的标准化中间结果。
 
-1. `preprocess`：接头过滤以及 miRNA tailing/trimming remapping
-2. `profile`：单遍扫描 SAM，生成 163 profile 和 5GMC 汇总；替代旧版对每条
-   miRNA 重读一次 SAM 的 Perl 实现
-3. `bubble`：将全部样本并排绘制为 trimming–tailing 气泡矩阵，每个 miRNA 一页
-4. `srna`：常规或 UMI 小 RNA genome mapping
-5. `mapping_summary`：汇总 Bowtie 日志
-6. `rnatype`：ShortStack 定位、featureCounts biotype 注释及 RNA type 分布绘图
-7. `length`：生成每个样本的全长 reads 与 5GMC 长度分布工作簿及 PDF 图
-8. `tailbase`：生成 tail base R 统计和图表
+| 步骤 | 主要功能 | 前置结果 | 直接图形 |
+| --- | --- | --- | --- |
+| `preprocess` | miRNA 分支质控、污染过滤和逐级 3′ remapping | 原始 FASTQ | FastQC HTML |
+| `profile` | 构建 11 × 11 修剪–加尾矩阵、summary、5GMC 和 sequence-logo 输入 | `preprocess` | 不直接产图 |
+| `bubble` | 按 miRNA 绘制多样本修剪–加尾气泡矩阵 | `profile` | 多页 PDF |
+| `srna` | 常规/UMI 文库处理、18–28 nt 筛选和基因组比对 | 原始 FASTQ | FastQC HTML |
+| `mapping_summary` | 汇总 Bowtie 日志中的总 reads、mapped reads 和比对率 | `srna` | 不直接产图 |
+| `rnatype` | ShortStack 定位、featureCounts 注释和唯一 RNA type 分类 | `srna` | RNA type 组成图和长度分布图 |
+| `length` | 统计 miRNA 全长 reads 与 5GMC 的长度分布 | `preprocess` | Excel 内嵌图和样本级 PDF |
+| `tailbase` | 汇总 trimming、总体 tailing 和非模板 tailing 的长度及碱基组成 | `profile`、`mapping_summary` | 每个样本 2 个 PDF |
 
-例如只运行前两个步骤：
-
-```bash
-python3 main.py -i 1_rawdata -o project_output --steps preprocess,profile -j 2
+```mermaid
+flowchart LR
+    P[preprocess] --> R[profile]
+    R --> B[bubble]
+    P --> L[length]
+    R --> T[tailbase]
+    S[srna] --> M[mapping_summary]
+    S --> Y[rnatype]
+    M --> T
 ```
 
-已有 profile 结果时，可单独生成类似 `new.pdf` 的多页气泡图：
+以下图片均由固定的匿名示意数据生成，仅用于说明图形结构，不代表真实样本或预期的
+生物学分布。可运行 `python3 docs/generate_demo_figures.py` 重新生成 README 示例图。
+
+### 1. `preprocess`：miRNA 末端修饰预处理与 remapping
+
+该步骤使用 Trim Galore 去接头、去除低质量及含 `N` 的 reads，并保留 12–30 nt
+序列。reads 首先精确比对 tRNA/snoRNA 参考以去除潜在污染，再精确比对 miRNA
+hairpin；未比对序列从 3′ 端逐次剪除 1–10 nt 后重新比对。最终合并为带有剪切信息的
+SAM，供后续 profile 与长度分析使用。
+
+```bash
+python3 main.py -i 1_rawdata -o project_output --steps preprocess -j 2
+```
+
+主要结果：
+
+- `work/tailing_trimming/trimmed_fasta/<sample>_trimmed_fastqc.html`：去接头后 FastQC 报告
+- `work/tailing_trimming/trimmed_fasta/<sample>_trimmed.fasta`：格式化的 reads
+- `work/tailing_trimming/remapping/<sample>/merged-alignment-sorted.sam`：合并后的核心比对结果
+- `work/tailing_trimming/remapping/<sample>/remapping.log`：tRNA/snoRNA 和 miRNA 比对日志
+
+FastQC 报告用于检查碱基质量、接头残留、序列长度和高频序列。README 中的简化示例如下；
+正式分析应打开每个样本对应的交互式 HTML 报告。
+
+![QC output example](docs/images/qc_example.png)
+
+### 2. `profile`：修剪–加尾矩阵与 5GMC 提取
+
+该步骤单遍扫描每个样本的合并 SAM，并依据 mature miRNA 的起止位置，将 reads 归入
+0–10 nt trimming 与 0–10 nt tailing 的 11 × 11 矩阵。同时提取 5′ genomic matching
+component（5GMC）reads，并生成 sequence-logo 输入和按 miRNA 汇总的计数表。
+
+```bash
+python3 main.py -o project_output --steps profile --resume
+```
+
+主要结果：
+
+- `results/tailing_trimming/profiles/<sample>.txt`：样本完整 profile
+- `results/tailing_trimming/profiles/<sample>.summary.txt`：总量、trimming 和 1–10 nt tailing 汇总
+- `results/tailing_trimming/profiles/<sample>/<miRNA>.txt`：单个 miRNA 的 11 × 11 矩阵
+- `results/tailing_trimming/5gmc/<sample>.5GMC`：5GMC reads
+- `results/tailing_trimming/sequence_logo/<sample>/`：每个 miRNA 的 sequence-logo 输入
+
+本步骤不直接生成图片。单 miRNA 矩阵由 `bubble` 可视化，5GMC 则由 `length` 和
+`tailbase` 用于后续统计。
+
+### 3. `bubble`：多样本 trimming–tailing 气泡图
+
+该步骤将同一 miRNA 在多个样本中的 11 × 11 profile 并排绘制。横轴为 trimming
+长度，纵轴为 tailing 长度，圆面积表示该组合在当前 miRNA profile 中的相对 read
+比例。PDF 每页对应一个 miRNA，适合逐个比较样本间的末端修饰模式。
 
 ```bash
 python3 main.py \
@@ -221,24 +279,118 @@ python3 main.py \
   --bubble-cols 2
 ```
 
-整洁目录中的默认输出为
-`results/tailing_trimming/bubble/tailing_trimming_bubble.pdf`。`--bubble-cols` 控制每行
-显示的样本数，`--bubble-output` 可指定 PDF 路径。
+主要结果：`results/tailing_trimming/bubble/tailing_trimming_bubble.pdf`。`--bubble-cols`
+控制每行样本数，`--bubble-output` 可覆盖输出路径。
 
-从已有 `work/tailing_trimming/remapping/<sample>/` 继续运行时，可以省略原始
-FASTQ，或用 `--filelist` 指定样本。旧目录通过 `--layout legacy` 继续支持。
-`--resume` 会根据每一步的最终输出跳过已完成样本；
-`--dry-run` 用于检查样本、参数、索引和即将执行的命令。
+![Trimming-tailing bubble plot example](docs/images/bubble_example.png)
 
-长度分析工作簿包含 `total reads mapped to miRNA`、`distribution of whole reads` 和
-`distribution of 5GMC` 三个工作表。首页同时嵌入全长 reads 与 5GMC 的长度分布图；
-两个数据工作表分别保存长度、read 数和占总 miRNA mapped reads 的比例。独立 PDF 位于
-`results/tailing_trimming/length/plots/`。对于旧版本已经生成的工作簿，使用
-`--steps length --resume` 可直接读取现有统计并补充 Excel 图表和 PDF，无需重新扫描 SAM。
+### 4. `srna`：small RNA 文库处理与基因组比对
 
-UMI 文库使用 `--umi-flag 1`，普通小 RNA 文库使用默认值 `2`。
+普通文库完成接头过滤后，保留 18–28 nt reads 并使用 Bowtie 对基因组进行零错配比对。
+UMI 文库还会识别 linker、提取 12 nt UMI、合并相同 insert–UMI 组合，并另行输出 UMI
+reads 的比对和长度统计。`--umi-flag 1` 表示 UMI 文库，默认值 `2` 表示普通文库。
 
-### RNA type 分类
+```bash
+python3 main.py -i 1_rawdata -o project_output --steps srna --umi-flag 2 -j 2
+```
+
+主要结果：
+
+- `work/srna/trimmed/<sample>_trimmed_fastqc.html`：small RNA 分支 FastQC 报告
+- `work/srna/genome_mapping/<sample>_trimmed_len.fq.gz`：18–28 nt reads
+- `work/srna/genome_mapping/<sample>_aligned.sam`：基因组比对结果
+- `work/srna/genome_mapping/<sample>.mapresults.txt`：Bowtie 比对日志
+- UMI 模式下的 `work/srna/umi/<sample>_umi.fa.gz`、比对结果和 `<sample>_umi_dist.csv`
+
+本步骤的直接图形仍为 FastQC HTML，其图形结构可参考步骤 1；UMI 长度输出为 TSV/CSV
+统计表，不自动生成 PDF。
+
+### 5. `mapping_summary`：基因组比对统计汇总
+
+该步骤解析所有样本的 Bowtie 日志，统一汇总输入 reads 数、至少一次成功比对的 reads
+数、比对率和 Bowtie reported alignment 数。它用于项目级质控，也是 `tailbase` 计算
+标准化指标时的输入之一。
+
+```bash
+python3 main.py -o project_output --steps mapping_summary
+```
+
+主要结果为 `results/srna/mapping_summary.tsv`，包含 `Sample`、`Total_reads`、
+`Mapped_reads`、`Mapped_rate(%)` 和 `Reported` 五列。本步骤不直接绘图，以便用户按实验
+设计自行制作跨样本 QC 图或纳入统计报告。
+
+### 6. `rnatype`：RNA type 分类与组成可视化
+
+该步骤将 18–28 nt reads 经 ShortStack 零错配定位和多重比对分配后，使用
+featureCounts 根据 GFF3 `biotype` 注释，并按预设优先级为每条已定位 read 确定唯一
+RNA type。图中颜色与图例类别一一对应，堆叠从上到下遵循图例顺序；纵坐标统一为
+`Percentage (%)`。
+
+```bash
+python3 main.py \
+  -i 1_rawdata \
+  -o project_output \
+  --steps srna,rnatype \
+  --jobs 2 \
+  --threads-per-sample 8
+```
+
+主要结果：
+
+- `results/srna/rnatype/rnatype_summary.tsv` 和 `.xlsx`：跨样本 RNA type 汇总
+- `results/srna/rnatype/tables/<sample>_rnatype_by_length.tsv`：样本按 read 长度分类结果
+- `results/srna/rnatype/plots/rnatype_composition.pdf` 和 `.png`：多样本总体组成
+- `results/srna/rnatype/plots/<sample>_rnatype_by_length.pdf`：样本内按长度的组成
+
+![RNA type output example](docs/images/rnatype_example.png)
+
+### 7. `length`：全长 reads 与 5GMC 长度分布
+
+该步骤从 miRNA remapping SAM 统计原始 read 长度及对应的 5GMC 长度，并以 mapped
+miRNA reads 总数为分母计算比例。每个样本同时产生 Excel 工作簿和双面板 PDF，用于
+判断完整 reads 与去除末端修饰后的基因组匹配部分是否具有不同长度峰。
+
+```bash
+python3 main.py -o project_output --steps length --resume
+```
+
+主要结果：
+
+- `results/tailing_trimming/length/<sample>_len_dist.xlsx`
+- `results/tailing_trimming/length/plots/<sample>_length_distribution.pdf`
+
+工作簿包含 `total reads mapped to miRNA`、`distribution of whole reads` 和
+`distribution of 5GMC` 三个工作表，首页嵌入两幅图。如果旧工作簿已存在但缺图，使用
+`--steps length --resume` 可读取现有统计并补图，无需重新扫描 SAM。
+
+![Whole-read and 5GMC length output example](docs/images/length_example.png)
+
+### 8. `tailbase`：末端碱基和修饰长度汇总
+
+该步骤整合 profile summary、5GMC、mapping summary 和 miRNA 注释，对 trimming、总体
+tailing 以及非模板 tailing 分别统计长度、A/T/C/G 碱基组成、百分比和 RPM。总体图包含
+所有推断的加尾事件；非模板图进一步排除与参考序列相同的模板性延伸，更适合描述真正的
+non-templated tailing。
+
+```bash
+python3 main.py -o project_output --steps tailbase --resume
+```
+
+主要结果：
+
+- `results/tailing_trimming/tailbase/tables/<sample>/<sample>_tail_summary.xlsx`
+- `results/tailing_trimming/tailbase/tables/<sample>/<sample>_tail_nt_summary.xlsx`
+- `results/tailing_trimming/tailbase/tables/<sample>/<sample>_trim_summary.xlsx`
+- `results/tailing_trimming/tailbase/plots/<sample>/<sample>_tailing_trimming_length.pdf`
+- `results/tailing_trimming/tailbase/plots/<sample>/<sample>_tailing_trimming_nt_length.pdf`
+
+![Tail-base output example](docs/images/tailbase_example.png)
+
+从已有 `work/tailing_trimming/remapping/<sample>/` 继续运行时，可以省略原始 FASTQ，
+或用 `--filelist` 指定样本。旧目录通过 `--layout legacy` 继续支持。`--resume` 根据每一步
+的最终输出跳过已完成任务；`--dry-run` 用于检查样本、参数、索引和即将执行的命令。
+
+### RNA type 分类规则与可配置参数
 
 `rnatype` 步骤复用 `srna` 步骤产生的 18–28 nt FASTQ。ShortStack 使用零错配、
 `mmap=u`、`bowtie_m=1000` 和 `ranmax=50`，与旧版 `0_workflow.sh` 保持一致；随后
@@ -270,6 +422,7 @@ pipeline/               Python 实现；样本级受控并行
 pipeline/bubble.py      多样本 trimming–tailing 气泡矩阵图
 pipeline/rnatype.py     ShortStack/featureCounts RNA type 分类与绘图
 assets/tail_base_summary.R  本地 R 汇总脚本
+docs/                   README 匿名示意图及其可重复生成脚本
 resources/              R/Python 所需的本地参考表（Git 忽略）
 requirements.txt        Python 依赖
 ```
