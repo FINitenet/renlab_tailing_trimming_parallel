@@ -265,12 +265,16 @@ def _plot_overall(summary, output_base):
             color=COLORS.get(category, "#808080"), width=0.82,
         )
         bottom = bottom + values
-    axis.set_ylabel("Percentage of ShortStack-mapped reads (%)")
+    axis.set_ylabel("Percentage (%)")
     axis.set_xlabel("")
     axis.set_ylim(0, 100)
     axis.tick_params(axis="x", labelrotation=90)
     axis.set_title("Small-RNA type composition", fontweight="bold")
-    axis.legend(title="RNA type", bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False)
+    handles, labels = axis.get_legend_handles_labels()
+    axis.legend(
+        handles[::-1], labels[::-1], title="RNA type",
+        bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False,
+    )
     axis.grid(axis="y", color="#d0d0d0", linewidth=0.5, alpha=0.8)
     axis.set_axisbelow(True)
     figure.tight_layout()
@@ -296,10 +300,14 @@ def _plot_by_length(table, sample, output_file):
         )
         bottom = bottom + values
     axis.set_xlabel("Read length (nt)")
-    axis.set_ylabel("Percentage of ShortStack-mapped reads (%)")
+    axis.set_ylabel("Percentage (%)")
     axis.set_xticks(matrix.index)
-    axis.set_title(f"{sample} — RNA type by read length", fontweight="bold")
-    axis.legend(title="RNA type", bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False)
+    axis.set_title(sample, fontweight="bold")
+    handles, labels = axis.get_legend_handles_labels()
+    axis.legend(
+        handles[::-1], labels[::-1], title="RNA type",
+        bbox_to_anchor=(1.02, 1), loc="upper left", frameon=False,
+    )
     axis.grid(axis="y", color="#d0d0d0", linewidth=0.5, alpha=0.8)
     axis.set_axisbelow(True)
     figure.tight_layout()
