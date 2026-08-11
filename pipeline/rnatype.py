@@ -258,7 +258,9 @@ def _plot_overall(summary, output_base):
     width = max(10, len(matrix) * 0.42)
     figure, axis = plt.subplots(figsize=(width, 6))
     bottom = pd.Series(0.0, index=matrix.index)
-    for category in categories:
+    # Draw in reverse so the visible stack from top to bottom follows the
+    # legend order: unassigned -> ... -> miRNA_primary_transcript.
+    for category in reversed(categories):
         values = matrix[category]
         axis.bar(
             matrix.index, values, bottom=bottom, label=category,
@@ -292,7 +294,9 @@ def _plot_by_length(table, sample, output_file):
     matrix = matrix[categories]
     figure, axis = plt.subplots(figsize=(9, 5))
     bottom = pd.Series(0.0, index=matrix.index)
-    for category in categories:
+    # Draw in reverse so the visible stack from top to bottom follows the
+    # legend order: unassigned -> ... -> miRNA_primary_transcript.
+    for category in reversed(categories):
         values = matrix[category]
         axis.bar(
             matrix.index, values, bottom=bottom, label=category,
