@@ -79,8 +79,8 @@ def _write_workbook(path, total, read_lengths, gmc_lengths):
         sheet.column_dimensions["A"].width = 12
         sheet.column_dimensions["B"].width = 16
         sheet.column_dimensions["C"].width = 16
-    _add_excel_chart(summary_sheet, read_sheet, "Whole-read length distribution", "A5")
-    _add_excel_chart(summary_sheet, gmc_sheet, "5GMC length distribution", "A21")
+    _add_excel_chart(summary_sheet, read_sheet, "Whole reads", "A5")
+    _add_excel_chart(summary_sheet, gmc_sheet, "5GMC", "A21")
     summary_sheet.column_dimensions["A"].width = 54
     summary_sheet.column_dimensions["B"].width = 18
     workbook.save(path)
@@ -104,7 +104,7 @@ def _plot_distributions(path, sample, total, read_lengths, gmc_lengths):
         axis.grid(axis="y", color="#d0d0d0", linewidth=0.5, alpha=0.8)
         axis.set_axisbelow(True)
     axes[0].set_ylabel("Percentage of mapped miRNA reads (%)")
-    figure.suptitle(f"{sample} — read length distributions", fontweight="bold")
+    figure.suptitle(sample, fontweight="bold")
     figure.tight_layout(rect=(0, 0, 1, 0.94))
     figure.savefig(path, bbox_inches="tight")
     plt.close(figure)
@@ -115,15 +115,12 @@ def run_sample(item, config):
     sam_file = Path(config["remapping_dir"]) / sample / "merged-alignment-sorted.sam"
     output_file = Path(config["length_dir"]) / f"{sample}_len_dist.xlsx"
     plot_file = Path(config["length_dir"]) / "plots" / f"{sample}_length_distribution.pdf"
-    if config["resume"] and output_file.is_file() and plot_file.is_file():
-        logging.info("[%s] length distribution already complete; skipping", sample)
-        return
-    if config["resume"] and output_file.is_file() and not plot_file.is_file():
-        logging.info("[%s] length table exists; generating missing charts", sample)
+    if config["resume"] and output_file.is_file():
+        logging.info("[%s] length table exists; refreshing charts", sample)
         total, read_lengths, gmc_lengths = _read_existing_workbook(output_file)
         _write_workbook(output_file, total, read_lengths, gmc_lengths)
         _plot_distributions(plot_file, sample, total, read_lengths, gmc_lengths)
-        logging.info("[%s] length charts complete", sample)
+        logging.info("[%s] length charts refreshed", sample)
         return
     if config["dry_run"]:
         logging.info(

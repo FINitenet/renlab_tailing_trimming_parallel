@@ -271,7 +271,6 @@ def _plot_overall(summary, output_base):
     axis.set_xlabel("")
     axis.set_ylim(0, 100)
     axis.tick_params(axis="x", labelrotation=90)
-    axis.set_title("Small-RNA type composition", fontweight="bold")
     handles, labels = axis.get_legend_handles_labels()
     axis.legend(
         handles[::-1], labels[::-1], title="RNA type",

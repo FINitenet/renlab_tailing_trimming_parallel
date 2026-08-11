@@ -53,14 +53,15 @@ def qc_example():
     axes[0].axhspan(28, 40, color="#d8efcf", zorder=-1)
     axes[0].axhspan(20, 28, color="#fff0bd", zorder=-1)
     axes[0].set(xlabel="Position in read (nt)", ylabel="Phred quality", ylim=(20, 40))
-    axes[0].set_title("Post-trimming quality profile", fontweight="bold")
+    axes[0].set_title("Quality", fontweight="bold")
     axes[1].bar(lengths, abundance, color="#54a9a6", width=0.8)
     axes[1].set(xlabel="Read length (nt)", ylabel="Percentage (%)")
-    axes[1].set_title("Post-trimming length profile", fontweight="bold")
+    axes[1].set_title("Length", fontweight="bold")
     for axis in axes:
         axis.grid(axis="y", color="#d0d0d0", linewidth=0.5)
         axis.set_axisbelow(True)
-    figure.tight_layout(rect=(0, 0.03, 1, 1))
+    figure.suptitle("Sample_A", fontweight="bold")
+    figure.tight_layout(rect=(0, 0.03, 1, 0.94))
     _finish(figure, "qc_example.png")
 
 
@@ -109,7 +110,7 @@ def length_example():
         axis.grid(axis="y", color="#d0d0d0", linewidth=0.5)
         axis.set_axisbelow(True)
     axes[0].set_ylabel("Percentage of mapped miRNA reads (%)")
-    figure.suptitle("Sample_A — read length distributions", fontweight="bold")
+    figure.suptitle("Sample_A", fontweight="bold")
     figure.tight_layout(rect=(0, 0.04, 1, 0.93))
     _finish(figure, "length_example.png")
 
@@ -163,7 +164,7 @@ def rnatype_example():
 
     figure, axes = plt.subplots(1, 2, figsize=(12.5, 4.8))
     for axis, labels, matrix, title in (
-        (axes[0], samples, overall, "Small-RNA type composition"),
+        (axes[0], samples, overall, None),
         (axes[1], lengths, by_length, "Sample_A"),
     ):
         bottom = np.zeros(matrix.shape[0])
@@ -175,7 +176,8 @@ def rnatype_example():
             handles.append(bars)
         axis.set_ylim(0, 100)
         axis.set_ylabel("Percentage (%)")
-        axis.set_title(title, fontweight="bold")
+        if title:
+            axis.set_title(title, fontweight="bold")
         axis.grid(axis="y", color="#d0d0d0", linewidth=0.5)
         axis.set_axisbelow(True)
     axes[1].set_xlabel("Read length (nt)")
