@@ -429,3 +429,84 @@ requirements.txt        Python 依赖
 
 默认的拟南芥 Bowtie 索引可以通过 `--mir-hairpin`、`--trsno` 和
 `--genome-index` 覆盖。运行 `python3 main.py --help` 查看全部参数。
+
+## 补充材料：定量标准化与 trimming–tailing 对角线判读
+
+### S1. 不同统计量及其分母
+
+本流程中的 raw count、profile 内百分比和 RPM 回答的问题不同，不能相互替代。设
+`C(s,m,t,a)` 为样本 `s` 中 miRNA（或相同成熟序列家族）`m` 在 trimming 长度 `t`、
+tailing 长度 `a` 格子的 read count，则各方法定义如下。
+
+| 方法 | 计算方式 | 主要用途 | 局限与推荐用法 |
+| --- | --- | --- | --- |
+| raw count | `C(s,m,t,a)` | 检查支持某个修饰状态的实际 read 数 | 受文库深度影响，不直接用于跨样本定量；应始终随百分比或 RPM 一起检查 |
+| GitHub 原始 bubble 面积 | `C(s,m,t,a) / sum(t,a) C(s,m,t,a) × 1500` | 比较同一 miRNA 在样本内的 trimming–tailing 构成 | 分母是该 miRNA 的整个 11 × 11 profile；这是 profile 内比例而不是 RPM。低丰度 miRNA 的少量 reads 也可能形成大气泡，不能据此判断绝对丰度回复 |
+| 全部 reads 构成百分比 | `100 × C / 该成熟序列家族全部分配 reads` | 展示 canonical 与各种修饰状态的完整组成 | 推荐作为 bubble 颜色；适合回答“该修饰占这个 miRNA 的多少” |
+| modified-only 百分比 | `100 × C / 该家族全部 modified reads`，并排除 `(0,0)` | 放大观察已发生修饰的 reads 如何分布 | 只描述修饰谱，不能与 canonical 比较；当 modified raw count 很低时不稳定，必须同时报告 raw count |
+| all-miRNA RPM | `10^6 × C / 样本全部已分配 miRNA reads` | 跨样本比较 miRNA 或修饰状态丰度 | 当前推荐的主定量分母；不依赖 ShortStack RNA-type 注释，但仍需检查 HEN1 缺失是否改变总体 miRNA 池 |
+| PTGS-proxy RPM | `10^6 × C / phasi_tasiRNA reads` | 检查结果是否依赖 all-miRNA 分母 | 作为敏感性分析；`phasi_tasiRNA` 只是可获得的 PTGS-siRNA proxy，不代表全部 PTGS-siRNA |
+| rRNA-derived RPM | `10^6 × C / rRNA reads` | 第二套外部参考分母敏感性分析 | 容易受 rRNA 降解、污染和建库差异影响，不建议单独作为主结论 |
+| combined stable-pool RPM | `10^6 × C / (all-miRNA + phasi/tasiRNA + rRNA-derived reads)` | 给 bubble 面积提供跨样本可比的丰度尺度 | 推荐用于候选 bubble 的面积；颜色仍使用家族内百分比，以同时表达“组成”和“丰度” |
+
+在 `nrpd1` 导致 hc-siRNA 整体塌陷的实验中，不应使用总 small-RNA reads 或 hc-siRNA
+总量作为主要分母，否则分母本身的强烈生物学变化会人为放大其他 RNA 类别。建议采用：
+
+1. 以 **all-miRNA RPM** 作为跨样本丰度的主结果；
+2. 同时报告 PTGS-proxy RPM、rRNA-derived RPM 和 combined stable-pool RPM 的分母敏感性；
+3. bubble 颜色使用家族内百分比，面积使用 combined stable-pool RPM，并在图旁保留 raw count；
+4. 若不同分母下效应方向及候选排序一致，结论才视为对标准化选择稳健。
+
+当前描述性比较不使用 edgeR/TMM，也不计算 P-value 或 FDR。先对 raw count 按上述参考池
+计算 RPM，再计算各生物学组的 mean RPM；组间倍数变化定义为
+`log2(mean RPM_A / mean RPM_B)`。不添加 pseudocount 时，零均值产生的
+`Inf`、`-Inf` 或 `NaN` 应原样保留，并同时报告每组 raw count 和重复间离散程度。
+`|log2FC| >= 1` 仅表示描述性的至少两倍变化，不等于统计显著。
+
+### S2. 对角线点的含义
+
+在 bubble 图中，横轴为 trimming 长度，纵轴为 tailing 长度。因此对角线
+`trimming = tailing = k` 表示成熟 miRNA 的 3′ 端缺失了 `k` 个参考碱基，同时 read
+末端又多出 `k` 个碱基。在 5′ 起点相同的前提下，这类 read 的总长度与注释成熟 miRNA
+相同，可称为“长度补偿型 trim-and-tail”或“3′ 端替换”。例如成熟序列末端为 `...ACGA`，
+read 末端为 `...ACUU` 时，可被记为 `(trim=2, tail=2)`。
+
+对角线不能自动解释为真实生物学修饰。当前 GitHub 流程先要求 read 与 hairpin 零错配
+比对；未比对 read 再从 3′ 端逐个剪除 1–10 nt 并重新零错配比对。因此，一条与成熟
+miRNA 等长、但末端连续 `k` 个碱基不同的 read，会在算法上自然落到 `(k,k)`。对角线
+信号可能是以下来源的混合：
+
+- 真实的先 trimming、后 non-templated tailing；在 `hen1` 背景下，以 U 为主并受
+  `heso2` 基因型影响时具有较强生物学合理性；
+- 3′ 端测序错误或末端低质量，尤其容易形成 `(1,1)`；
+- mature miRNA 注释末端偏差、alternative DCL processing 或同源家族成员的末端差异；
+- adapter 残留，或 hairpin/genome 上的模板性延伸被误判为非模板 tail；
+- Bowtie `-a` 多重比对使同一 read 被计入多个相关 hairpin，从而重复强化相同模式；
+- 低 raw count 格子因 profile 内百分比显示方式而在视觉上被放大。
+
+### S3. 对角线判定与报告标准
+
+建议对每个候选的对角线格子提取原始 read 序列和实际 tail sequence，并按下表判读。
+
+| 检查项目 | 更支持真实 trim-and-tail | 更支持技术或算法伪影 |
+| --- | --- | --- |
+| tail 组成 | 以 U 为主，或存在明确的酶偏好 | 碱基混杂、富集 adapter motif |
+| 基因型方向 | `hen1` 富集，并在 `heso2` 背景中按预期改变 | WT 和所有突变体近似一致 |
+| 组织与表型 | 花序中出现与育性回复一致的变化，叶片差异较弱 | 组织和表型方向不一致 |
+| 生物学重复 | 至少多个重复方向一致且有足够 raw count | 单个重复驱动，或仅有少量 reads |
+| 3′ 碱基质量 | 末端质量正常 | 末端质量明显下降，特别是 `(1,1)` |
+| precursor/genome 检查 | tail 不存在于对应 hairpin 或基因组延伸序列 | 所谓 tail 实际可由模板解释 |
+| 替代比对策略 | 允许少量错配或使用显式 3′ 端解析后仍存在 | 改变精确匹配策略后对角线明显塌陷 |
+| 家族与多重比对 | 按相同成熟序列合并家族、每条 read 总权重为 1 后仍存在 | 只在重复注释成员中同时出现 |
+
+最低限度应同时报告：对角线 raw count、占全部家族 reads 的百分比、占 modified reads
+的百分比、RPM、tail 碱基组成以及三个生物学重复。可增加两个汇总指标：
+
+```text
+Diagonal fraction = sum(k >= 1) C(trim=k, tail=k) / 全部 modified reads
+U-diagonal fraction = 对角线上 U-tail reads / 全部对角线 reads
+```
+
+对角线点只有在 raw count 充分、重复稳定、tail 以 U 为主、排除模板性延伸，并且基因型
+及组织变化与表型方向一致时，才适合作为候选分子回复证据。单独的 `(1,1)` 点或仅由
+profile 内大气泡支持的点，应优先视为待验证信号，而不是直接下生物学结论。
