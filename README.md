@@ -1,3 +1,5 @@
+<p align="right"><strong>中文</strong> | <a href="README_EN.md">English</a></p>
+
 # Parallel miRNA tailing/trimming workflow
 
 ## 概述
