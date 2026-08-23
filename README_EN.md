@@ -1,6 +1,11 @@
 <p align="right"><a href="README.md">中文</a> | <strong>English</strong></p>
 
-# Parallel miRNA tailing/trimming workflow
+# miR3End
+
+**A parallel workflow for profiling miRNA 3′-end trimming and tailing**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](VERSION)
 
 ## Overview
 
@@ -33,9 +38,9 @@ for batch analysis of multi-sample small RNA-seq projects.
 This project was refactored from `renlab_tailing_trimming_20240111`. The core
 statistical definitions and major analysis parameters were retained, while Python and
 R logic previously spread across multiple directories was consolidated into this
-repository. Repeated SAM scans were replaced with a single-pass strategy. Bowtie
-indexes and reference tables under `resources/` are supplied separately as local
-reference data and are not tracked by Git.
+repository. Repeated SAM scans were replaced with a single-pass strategy. Users
+prepare Bowtie indexes and organism reference files as described in
+`resources/README.md`; the repository no longer depends on the original server layout.
 
 ### Workflow
 
@@ -87,7 +92,7 @@ flowchart TD
 
 | Item | Original version | New version |
 | --- | --- | --- |
-| Project structure | Referenced external scripts such as `TRMRNAseqTools/0_workflow_for_srna_seq.py` at runtime | Analysis logic and R scripts are included in this repository; reference tables remain local under the Git-ignored `resources/` directory |
+| Project structure | Referenced external scripts such as `TRMRNAseqTools/0_workflow_for_srna_seq.py` at runtime | Analysis logic and R scripts are included; external reference requirements and parameters are documented in `resources/README.md` |
 | Multi-sample execution | Samples were mainly processed serially | `--jobs` controls sample-level parallelism |
 | Resource control | Tool thread counts were scattered across scripts | `--threads-per-sample` controls per-sample tool threads; total demand is approximately `jobs × threads-per-sample` |
 | Profile calculation | Perl rescanned the SAM file once for each miRNA, for 538 complete scans | Python scans each SAM once and produces profiles, summaries, and 5GMC output together |
@@ -127,26 +132,40 @@ creation bounded.
 
 The external small-RNA workflow, statistical logic, and R scripts used by the original
 pipeline are now included in this repository, so the original server directory layout
-is no longer required. `resources/` is listed in `.gitignore`: local server files
-remain available but are not uploaded to GitHub. A new environment must prepare these
-reference tables or specify them with `--meta-file`, `--mechanism-file`, and
-`--sequence-merge-file`. Large Bowtie indexes are likewise supplied as external
-reference data through command-line options and are not committed to Git.
+is no longer required. Executables are resolved from the active Conda environment or
+`PATH`; reference indexes and annotations are supplied through command-line options or
+`MIR3END_*` environment variables. No `/bios-store1`, `/home`, or `/usr/local`
+machine-specific path remains as a default. Reference requirements are documented in
+`resources/README.md`; record each source, release, and checksum with the analysis.
 
-The workflow has passed Python/R syntax checks, dry-run checks, a two-sample parallel
-test, and length-distribution and tail-base summary tests. These tests verify
-scheduling, resume behavior, and generation of major outputs. Before a production
-analysis, use a small representative sample set to confirm local software versions,
-index paths, and resource configuration.
+`test/` contains synthetic minimal data and a directly runnable profile-stage smoke
+test that requires neither an external genome nor an aligner. Before production use,
+run a small representative sample set to confirm local software versions, indexes,
+and resource configuration.
 
-## Requirements
+## Installation and requirements
 
-- Python 3.8+
-- Python packages listed in `requirements.txt`
-- Command-line tools: `trim_galore`, `bowtie`, `ShortStack`, `featureCounts`, and `Rscript`
-- R packages: `tidyverse`, `openxlsx`, `data.table`, `reshape2`, and `lubridate`
-- Tail-base analysis uses the legacy `/usr/local/bin/Rscript` by default; override it with `--rscript`
-- Bowtie indexes remain external large reference data and are supplied through command-line options
+The versioned Conda environment is recommended; `environment.yml` includes Python,
+R, and command-line dependencies:
+
+```bash
+conda env create -f environment.yml
+conda activate mir3end-0.1.0
+python main.py --version
+python test/run_smoke_test.py
+```
+
+Use `requirements.txt` for Python-only installation. The complete workflow also
+requires `bowtie`, `trim_galore`, `ShortStack`, `featureCounts`, and `Rscript`; these
+are resolved from `PATH` unless explicitly overridden.
+
+## Release and citation
+
+The current release candidate is `0.1.0`. miR3End is distributed under the
+[MIT License](LICENSE), with citation metadata in [`CITATION.cff`](CITATION.cff).
+The repository also includes `.zenodo.json`. After merging the release branch,
+connect the repository to Zenodo and create the `v0.1.0` GitHub Release to mint a
+version DOI. Add that DOI to `CITATION.cff`, this README, and the manuscript abstract.
 
 ## Quick start
 
@@ -154,6 +173,11 @@ index paths, and resource configuration.
 python3 main.py \
   -i /path/to/1_rawdata \
   -o /path/to/project \
+  --mir-hairpin /path/to/hairpin_index_prefix \
+  --trsno /path/to/trsno_index_prefix \
+  --genome-index /path/to/genome_index_prefix \
+  --genome-fasta /path/to/genome.fa \
+  --rnatype-annotation /path/to/annotation.gff3 \
   --jobs 2 \
   --threads-per-sample 8
 ```
