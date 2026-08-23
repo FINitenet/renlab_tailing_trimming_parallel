@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: Cai
     given-names: Yuchen
-repository-code: "https://github.com/FINitenet/renlab_tailing_trimming_parallel"
-url: "https://github.com/FINitenet/renlab_tailing_trimming_parallel"
+repository-code: "https://github.com/FINitenet/miR3End"
+url: "https://github.com/FINitenet/miR3End"
 version: 0.1.0
 date-released: 2026-08-23
 license: MIT
