@@ -1,11 +1,6 @@
 <p align="right"><strong>中文</strong> | <a href="README_EN.md">English</a></p>
 
-# miR3End
-
-**A parallel workflow for profiling miRNA 3′-end trimming and tailing**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](VERSION)
+# Parallel miRNA tailing/trimming workflow
 
 ## 概述
 
@@ -29,8 +24,8 @@ mapping statistics 汇总、全长 reads 与 5GMC 长度分布，以及 tail-bas
 
 本项目由 `renlab_tailing_trimming_20240111` 重构而来。在保持核心统计定义和主要
 分析参数不变的基础上，将原先分散于多个目录的 Python 和 R 分析逻辑整合到当前
-仓库，并以单遍 SAM 扫描替代重复扫描策略。Bowtie 索引和物种参考文件由用户按
-`resources/README.md` 准备，仓库不再依赖原服务器目录结构。
+仓库，并以单遍 SAM 扫描替代重复扫描策略。Bowtie 索引及 `resources/` 参考表作为
+本地参考数据单独提供，不纳入 Git 版本管理。
 
 ### 分析流程
 
@@ -82,7 +77,7 @@ flowchart TD
 
 | 项目 | 原版本 | 新版本 |
 | --- | --- | --- |
-| 项目结构 | 运行时引用 `TRMRNAseqTools/0_workflow_for_srna_seq.py` 等外部脚本 | 已将相关逻辑和 R 脚本整合到本仓库；外部参考资源及其参数见 `resources/README.md` |
+| 项目结构 | 运行时引用 `TRMRNAseqTools/0_workflow_for_srna_seq.py` 等外部脚本 | 已将相关逻辑和 R 脚本整合到本仓库；参考表放在本地 `resources/`，不由 Git 跟踪 |
 | 多样本运行 | 主要按样本串行处理 | 使用 `--jobs` 控制样本级并行，可同时处理多个样本 |
 | 资源控制 | 工具线程数分散在不同脚本中 | 使用 `--threads-per-sample` 统一控制单样本线程数，总线程数约为 `jobs × threads-per-sample` |
 | profile 统计 | Perl 针对每条 miRNA 重复扫描 SAM，共进行 538 次全文件扫描 | Python 单遍扫描 SAM，同时生成 profile、summary 和 5GMC 结果 |
@@ -116,36 +111,23 @@ python3 main.py -i 1_rawdata -o results --jobs 2 --threads-per-sample 8
 ### 独立性和可复现性
 
 原流程引用的外部小 RNA workflow、统计逻辑和 R 脚本已经纳入当前仓库，不再需要
-保持原服务器上的脚本目录结构。所有可执行程序默认从当前 Conda 环境或 `PATH`
-查找；所有参考索引和注释均通过命令行参数或 `MIR3END_*` 环境变量提供。仓库中不再
-包含 `/bios-store1`、`/home` 或 `/usr/local` 的机器专属默认路径。外部参考资源的
-要求记录在 `resources/README.md`，分析时应同时保存其来源、版本和校验值。
+保持原服务器上的脚本目录结构。`resources/` 已加入 `.gitignore`，服务器本地文件会
+保留，但不会上传到 GitHub；新环境需要自行准备这些参考表，或分别通过
+`--meta-file`、`--mechanism-file` 和 `--sequence-merge-file` 指定。Bowtie 索引体积
+较大，同样作为外部参考数据通过命令行参数指定，不提交到 Git 仓库。
 
-`test/` 提供不依赖外部基因组或比对程序的合成最小数据和可直接运行的 profile
-smoke test。正式分析前仍建议先用少量代表性样本验证本机的软件版本、索引路径和
-资源配置。
+流程已完成 Python/R 语法检查、dry-run 检查、双样本并行测试，以及长度分布和
+tail-base 汇总测试。上述测试用于确认调度、续跑和主要输出生成逻辑可以正常工作；
+正式分析前仍建议先用少量代表性样本验证本机的软件版本、索引路径和资源配置。
 
-## 安装与运行环境
+## 运行环境
 
-推荐使用版本化 Conda 环境；`environment.yml` 同时包含 Python、R 和命令行依赖：
-
-```bash
-conda env create -f environment.yml
-conda activate mir3end-0.1.0
-python main.py --version
-python test/run_smoke_test.py
-```
-
-仅安装 Python 依赖时可使用 `requirements.txt`，但完整流程仍需要 `bowtie`、
-`trim_galore`、`ShortStack`、`featureCounts` 和 `Rscript`。这些工具均从 `PATH`
-查找，也可用相应参数覆盖。
-
-## 发布与引用
-
-当前发布候选版本为 `0.1.0`。软件采用 [MIT License](LICENSE)，引用元数据见
-[`CITATION.cff`](CITATION.cff)。仓库同时提供 `.zenodo.json`；合并发布分支后，在
-Zenodo 中连接该 GitHub 仓库并创建 `v0.1.0` Release，即可获得版本 DOI。DOI 生成后
-应回填 `CITATION.cff`、README 和论文摘要中的软件 URL。
+- Python 3.8+
+- Python 包见 `requirements.txt`
+- 命令行工具：`trim_galore`、`bowtie`、`ShortStack`、`featureCounts`、`Rscript`
+- R 包：`tidyverse`、`openxlsx`、`data.table`、`reshape2`、`lubridate`
+- tail-base 默认使用旧流程中的 `/usr/local/bin/Rscript`；可通过 `--rscript` 覆盖
+- Bowtie 索引仍属于大型参考数据，通过参数指定，不复制进代码目录
 
 ## 快速开始
 
@@ -153,11 +135,6 @@ Zenodo 中连接该 GitHub 仓库并创建 `v0.1.0` Release，即可获得版本
 python3 main.py \
   -i /path/to/1_rawdata \
   -o /path/to/project \
-  --mir-hairpin /path/to/hairpin_index_prefix \
-  --trsno /path/to/trsno_index_prefix \
-  --genome-index /path/to/genome_index_prefix \
-  --genome-fasta /path/to/genome.fa \
-  --rnatype-annotation /path/to/annotation.gff3 \
   --jobs 2 \
   --threads-per-sample 8
 ```
