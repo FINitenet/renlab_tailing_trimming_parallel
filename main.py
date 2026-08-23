@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -16,32 +17,16 @@ from pipeline.common import (
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT / "assets"
 RESOURCES = ROOT / "resources"
+VERSION = "0.1.0"
 
-DEFAULT_HAIRPIN = (
-    "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
-    "ath_hairpin_bowtie_index/hairpin"
-)
-DEFAULT_TRSNO = (
-    "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
-    "ath_trsnoRNA_bowtie_index/ensembl39_araport2016_trsRNA"
-)
-DEFAULT_GENOME = (
-    "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
-    "ath_chr_bowtie_index/Arabidopsis_thaliana.TAIR10.dna.toplevel"
-)
-DEFAULT_GENOME_FASTA = DEFAULT_GENOME + ".fa"
-DEFAULT_RNATYPE_ANNOTATION = (
-    "/bios-store1/chenyc/Reference_Source/Arabidopsis_Reference/"
-    "Arabidopsis_thaliana.TAIR10.53.md.gff3"
-)
-DEFAULT_SHORTSTACK = "/bios-store1/chenyc/scripts/Github_scripts/ShortStack3/ShortStack"
-ENV_FEATURECOUNTS = Path(sys.executable).resolve().parent / "featureCounts"
-SERVER_FEATURECOUNTS = Path("/home/chenyc/miniforge3/envs/bioinfo/bin/featureCounts")
-DEFAULT_FEATURECOUNTS = str(next(
-    (path for path in (ENV_FEATURECOUNTS, SERVER_FEATURECOUNTS) if path.is_file()),
-    Path("featureCounts"),
-))
-DEFAULT_RSCRIPT = "/usr/local/bin/Rscript"
+DEFAULT_HAIRPIN = os.environ.get("MIR3END_HAIRPIN_INDEX")
+DEFAULT_TRSNO = os.environ.get("MIR3END_TRSNO_INDEX")
+DEFAULT_GENOME = os.environ.get("MIR3END_GENOME_INDEX")
+DEFAULT_GENOME_FASTA = os.environ.get("MIR3END_GENOME_FASTA")
+DEFAULT_RNATYPE_ANNOTATION = os.environ.get("MIR3END_RNATYPE_ANNOTATION")
+DEFAULT_SHORTSTACK = os.environ.get("MIR3END_SHORTSTACK", "ShortStack")
+DEFAULT_FEATURECOUNTS = os.environ.get("MIR3END_FEATURECOUNTS", "featureCounts")
+DEFAULT_RSCRIPT = os.environ.get("MIR3END_RSCRIPT", "Rscript")
 STEP_ORDER = (
     "preprocess", "profile", "bubble", "srna", "mapping_summary", "rnatype", "length", "tailbase"
 )
@@ -59,6 +44,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Self-contained, parallel plant miRNA tailing/trimming workflow."
     )
+    parser.add_argument("--version", action="version", version=f"miR3End {VERSION}")
     parser.add_argument("-i", "--input", default="1_rawdata", help="raw FASTQ directory")
     parser.add_argument("-o", "--output", default=".", help="project output directory")
     parser.add_argument("--layout", choices=("auto", "organized", "legacy"), default="auto",
@@ -73,15 +59,15 @@ def parse_args(argv=None):
     parser.add_argument("--umi-flag", type=int, choices=(1, 2), default=2,
                         help="1: UMI library; 2: standard small-RNA library")
     parser.add_argument("--mir-hairpin", default=DEFAULT_HAIRPIN,
-                        help="miRNA hairpin Bowtie index prefix")
+                        help="miRNA hairpin Bowtie index prefix (or MIR3END_HAIRPIN_INDEX)")
     parser.add_argument("--trsno", default=DEFAULT_TRSNO,
-                        help="tRNA/snoRNA Bowtie index prefix")
+                        help="tRNA/snoRNA Bowtie index prefix (or MIR3END_TRSNO_INDEX)")
     parser.add_argument("--genome-index", default=DEFAULT_GENOME,
-                        help="genome Bowtie index prefix")
+                        help="genome Bowtie index prefix (or MIR3END_GENOME_INDEX)")
     parser.add_argument("--genome-fasta", default=DEFAULT_GENOME_FASTA,
-                        help="genome FASTA used by ShortStack")
+                        help="genome FASTA used by ShortStack (or MIR3END_GENOME_FASTA)")
     parser.add_argument("--rnatype-annotation", default=DEFAULT_RNATYPE_ANNOTATION,
-                        help="GFF3 containing gene/ncRNA_gene biotype attributes")
+                        help="GFF3 biotype annotation (or MIR3END_RNATYPE_ANNOTATION)")
     parser.add_argument("--rnatype-priority", default=None,
                         help="optional RNA-type priority file, one category per line")
     parser.add_argument("--rnatype-stranded", type=int, choices=(0, 1, 2), default=0,
@@ -177,15 +163,29 @@ def preflight(args, steps, config):
     if "preprocess" in steps:
         config["trim_galore"] = require_executable("trim_galore")
         config["bowtie"] = require_executable("bowtie")
+        if not args.mir_hairpin or not args.trsno:
+            raise ValueError(
+                "--mir-hairpin and --trsno are required for preprocess "
+                "(or set MIR3END_HAIRPIN_INDEX and MIR3END_TRSNO_INDEX)"
+            )
         require_bowtie_index(args.mir_hairpin)
         require_bowtie_index(args.trsno)
     if "srna" in steps:
         config["trim_galore"] = require_executable("trim_galore")
         config["bowtie"] = require_executable("bowtie")
+        if not args.genome_index:
+            raise ValueError(
+                "--genome-index is required for srna (or set MIR3END_GENOME_INDEX)"
+            )
         require_bowtie_index(args.genome_index)
     if "rnatype" in steps:
         config["shortstack"] = require_executable(args.shortstack)
         config["featurecounts"] = require_executable(args.featurecounts)
+        if not args.genome_fasta or not args.rnatype_annotation:
+            raise ValueError(
+                "--genome-fasta and --rnatype-annotation are required for rnatype "
+                "(or set MIR3END_GENOME_FASTA and MIR3END_RNATYPE_ANNOTATION)"
+            )
         require_file(config["genome_fasta"], "ShortStack genome FASTA")
         require_file(config["rnatype_annotation"], "RNA-type GFF3 annotation")
         if config["rnatype_priority"] is not None:
@@ -270,8 +270,13 @@ def build_config(args):
         "mir_hairpin": args.mir_hairpin,
         "trsno": args.trsno,
         "genome_index": args.genome_index,
-        "genome_fasta": Path(args.genome_fasta).expanduser().resolve(),
-        "rnatype_annotation": Path(args.rnatype_annotation).expanduser().resolve(),
+        "genome_fasta": (
+            Path(args.genome_fasta).expanduser().resolve() if args.genome_fasta else None
+        ),
+        "rnatype_annotation": (
+            Path(args.rnatype_annotation).expanduser().resolve()
+            if args.rnatype_annotation else None
+        ),
         "rnatype_priority": (
             Path(args.rnatype_priority).expanduser().resolve() if args.rnatype_priority else None
         ),
