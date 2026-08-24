@@ -71,7 +71,7 @@ flowchart TD
 - 全长 reads 和 5GMC 的长度分布工作簿及样本级双面板 PDF
 - 不同末端碱基及修饰长度的计数、比例和 RPM 结果
 - 按组织/基因型汇总生物学重复的 A/C/G/T 分碱基 tailing/trimming 图（可选）
-- TAS（全部注释位点）和高丰度 hc-siRNA locus 的 trimming–tailing 气泡图
+- canonical TAS（TAS1a/b/c、TAS2a、TAS3a/b/c、TAS4）和高丰度 hc-siRNA locus 的 trimming–tailing 气泡图
 - 常规或 UMI small RNA 的基因组比对结果及 mapping statistics
 - ShortStack 定位后的 RNA type 计数、比例、长度分布及多样本组成图
 
@@ -376,13 +376,12 @@ python3 main.py \
   --resume
 ```
 
-TAS 注释位点全部逐 locus 绘制。hc-siRNA 只有在至少一个样本中完全匹配 raw abundance 达到阈值时保留，
+canonical TAS 注释位点（TAS1a/b/c、TAS2a、TAS3a/b/c、TAS4）全部逐 locus 绘制；PHAS21/PHAS24 不作为 TAS。hc-siRNA 只有在至少一个样本中完全匹配 raw abundance 达到阈值时保留，
 避免多个弱样本简单累加后进入结果。每条序列只分配给组合 locus 参考中的一个最佳零
-错配位置，从而避免重复区 read 在多个 hc-siRNA locus 中重复计数。入选的 hc-siRNA
+错配位置，从而避免重复区 read 在多个 hc-siRNA locus 中重复计数。入选的 hc-siRNA 也逐 locus 分页绘制，不再汇总成单页。
 locus 按用户指定的元数据列分别汇总成多样本大图；当前项目按组织和生物学重复拆分，
 每个文件包含同一重复的各基因型；
-逐 locus 数值仍保存在表格中，
-避免产生无法审阅的数千页 PDF。绘图直接调用原 `bubble` 面板函数，保留原坐标方向、
+每个 PDF 以一页一个 locus 的形式保存。绘图直接调用原 `bubble` 面板函数，保留原坐标方向、
 气泡缩放、颜色、字体、网格和两列布局。主要结果位于
 `results/tailing_trimming/locus_bubble/`；`selected_loci.tsv` 记录筛选依据，
 `bubble_matrix_long.tsv` 保存作图数值。

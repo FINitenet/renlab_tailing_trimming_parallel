@@ -217,6 +217,7 @@ def preflight(args, steps, config):
     if "locus_bubble" in steps:
         config["bowtie"] = require_executable("bowtie")
         config["bowtie_build"] = require_executable("bowtie-build")
+        config["pdfunite"] = require_executable("pdfunite")
         require_file(config["genome_fasta"], "genome FASTA")
         require_file(config["rnatype_annotation"], "RNA-type GFF3 annotation")
         if args.locus_bubble_hc_min_abundance < 0:

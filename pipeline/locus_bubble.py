@@ -2,7 +2,9 @@ import csv
 import gzip
 import logging
 import math
+import multiprocessing
 import os
+import re
 import sqlite3
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -21,7 +23,7 @@ from .bubble import _plot_sample as _plot_original_sample
 from .common import run_command
 
 
-TARGET_TYPES = {"phasi_tasiRNA": "TAS", "hc-siRNA": "hc-siRNA"}
+CANONICAL_TAS_ID = re.compile(r"^TAS(?:1[abc]|2a|3[abc]|4)$", re.IGNORECASE)
 COLORS = (
     "#9b4b8f", "#4c9a51", "#4c78a8", "#e6863b", "#b279a2",
     "#54a9a6", "#e45756", "#72b7b2", "#f2cf5b", "#8f6bb3",
@@ -43,17 +45,19 @@ def _load_loci(gff_file):
             if len(fields) != 9 or fields[2] not in {"gene", "ncRNA_gene"}:
                 continue
             attrs = _attributes(fields[8])
-            locus_type = TARGET_TYPES.get(attrs.get("biotype"))
-            if locus_type is None:
-                continue
             raw_id = attrs.get("ID") or attrs.get("Name") or (
                 f"{fields[0]}:{fields[3]}-{fields[4]}"
             )
+            biotype = attrs.get("biotype")
+            if biotype == "hc-siRNA":
+                locus_type = "hc-siRNA"
+            elif biotype == "phasi_tasiRNA" and CANONICAL_TAS_ID.fullmatch(raw_id):
+                locus_type = "TAS"
+            else:
+                continue
             seen[raw_id] += 1
             locus_id = raw_id if seen[raw_id] == 1 else f"{raw_id}_{seen[raw_id]}"
             expected = 24 if locus_type == "hc-siRNA" else 21
-            if locus_type == "TAS" and raw_id.upper().startswith("PHAS24"):
-                expected = 24
             loci.append({
                 "key": f"L{len(loci) + 1:05d}",
                 "id": locus_id,
@@ -64,7 +68,7 @@ def _load_loci(gff_file):
                 "expected": expected,
             })
     if not loci:
-        raise ValueError(f"No TAS/phasiRNA or hc-siRNA loci found in {gff_file}")
+        raise ValueError(f"No canonical TAS or hc-siRNA loci found in {gff_file}")
     return loci
 
 
@@ -364,32 +368,6 @@ def _plot_pdf(path, selected, locus_type, matrices, sample_group, columns):
                 logging.info("%s bubble pages: %d/%d", locus_type, index, len(loci))
 
 
-def _plot_hc_aggregate(path, selected, matrices, sample_group, columns, threshold):
-    loci = [item[0] for item in selected if item[0]["type"] == "hc-siRNA"]
-    rows = math.ceil(len(sample_group) / columns)
-    figure, axes = plt.subplots(
-        rows, columns, squeeze=False, figsize=(5.0 * columns, 4.8 * rows)
-    )
-    for panel_index, (sample_index, sample) in enumerate(sample_group):
-        matrix = np.zeros((11, 11), dtype=float)
-        for locus in loci:
-            matrix += matrices.get((locus["key"], sample_index), np.zeros((11, 11)))
-        _plot_panel(
-            axes.flat[panel_index], matrix, sample,
-            COLORS[panel_index % len(COLORS)],
-        )
-    for axis in axes.flat[len(sample_group):]:
-        axis.set_visible(False)
-    figure.suptitle(
-        f"hc-siRNA loci with max-sample exact abundance >= {threshold} (n={len(loci)})",
-        fontsize=12, fontweight="bold",
-    )
-    figure.tight_layout(rect=(0, 0, 1, 0.975))
-    figure.savefig(path)
-    plt.close(figure)
-    logging.info("hc-siRNA aggregate bubble complete: %d loci", len(loci))
-
-
 def _sample_groups(samples, metadata_path, group_columns):
     index_by_raw = {sample: index for index, (sample, _) in enumerate(samples)}
     if metadata_path is None:
@@ -422,6 +400,84 @@ def _sample_groups(samples, metadata_path, group_columns):
     return dict(groups)
 
 
+def _plot_tas_group(output_dir, group_name, sample_group, selected, matrices, config):
+    tas_pdf = output_dir / f"{group_name}_TAS_tailing_trimming_bubble.pdf"
+    _plot_pdf(
+        tas_pdf, selected, "TAS", matrices, sample_group,
+        config["locus_bubble_cols"],
+    )
+
+
+def _plot_groups(output_dir, sample_groups, selected, matrices, config):
+    # Each PDF is independent. Forking lets custom metadata produce separate
+    # replicate/group files concurrently without changing the original panel
+    # drawing routine or copying the large matrix dictionary at process start.
+    context = multiprocessing.get_context("fork")
+
+    def run_processes(tasks):
+        failed = []
+        max_parallel = min(48, os.cpu_count() or 1)
+        for offset in range(0, len(tasks), max_parallel):
+            processes = []
+            for name, target, args in tasks[offset:offset + max_parallel]:
+                process = context.Process(target=target, args=args, name=name)
+                process.start()
+                processes.append(process)
+            for process in processes:
+                process.join()
+                if process.exitcode != 0:
+                    failed.append(f"{process.name} (exit {process.exitcode})")
+        if failed:
+            raise RuntimeError("Locus bubble plotting failed: " + ", ".join(failed))
+
+    groups = list(sample_groups.items())
+    tas_tasks = []
+    for group_name, sample_group in groups:
+        tas_tasks.append((
+            f"TAS-{group_name}", _plot_tas_group,
+            (output_dir, group_name, sample_group, selected, matrices, config),
+        ))
+    run_processes(tas_tasks)
+
+    hc_selected = [item for item in selected if item[0]["type"] == "hc-siRNA"]
+    if not hc_selected:
+        raise ValueError("No hc-siRNA loci meet the configured abundance threshold")
+    chunk_count = min(8, len(hc_selected))
+    chunk_size = math.ceil(len(hc_selected) / chunk_count)
+    parts_dir = output_dir / ".hc_pdf_parts"
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    hc_tasks = []
+    parts_by_group = defaultdict(list)
+    for group_name, sample_group in groups:
+        for chunk_index in range(chunk_count):
+            start = chunk_index * chunk_size
+            chunk = hc_selected[start:start + chunk_size]
+            if not chunk:
+                continue
+            part_path = parts_dir / f"{group_name}.part_{chunk_index + 1:02d}.pdf"
+            parts_by_group[group_name].append(part_path)
+            hc_tasks.append((
+                f"hc-{group_name}-{chunk_index + 1}", _plot_pdf,
+                (part_path, chunk, "hc-siRNA", matrices, sample_group,
+                 config["locus_bubble_cols"]),
+            ))
+    run_processes(hc_tasks)
+
+    for group_name, _ in groups:
+        hc_pdf = output_dir / (
+            f"{group_name}_hc_siRNA_abundance_ge_"
+            f"{config['locus_bubble_hc_min_abundance']}_tailing_trimming_bubble.pdf"
+        )
+        merged_pdf = parts_dir / f"{group_name}.merged.pdf"
+        if merged_pdf.exists():
+            merged_pdf.unlink()
+        run_command([config["pdfunite"], *parts_by_group[group_name], merged_pdf])
+        os.replace(merged_pdf, hc_pdf)
+        for part_path in parts_by_group[group_name]:
+            part_path.unlink()
+    parts_dir.rmdir()
+
+
 def run(samples, config):
     if not samples:
         raise ValueError("No samples selected for locus tailing/trimming bubbles")
@@ -430,6 +486,7 @@ def run(samples, config):
     sample_groups = _sample_groups(
         samples, config["locus_bubble_metadata"], config["locus_bubble_group_columns"]
     )
+    completion_marker = output_dir / "canonical_TAS_per_locus_hc.complete"
     expected_pdfs = []
     for tissue in sample_groups:
         expected_pdfs.extend((
@@ -439,7 +496,8 @@ def run(samples, config):
                 f"{config['locus_bubble_hc_min_abundance']}_tailing_trimming_bubble.pdf"
             ),
         ))
-    if config["resume"] and all(path.is_file() for path in expected_pdfs):
+    if (config["resume"] and completion_marker.is_file()
+            and all(path.is_file() for path in expected_pdfs)):
         logging.info("Locus bubble plots already complete; skipping: %s", output_dir)
         return
     if config["dry_run"]:
@@ -448,22 +506,29 @@ def run(samples, config):
         output_dir.mkdir(parents=True, exist_ok=True)
         work_dir.mkdir(parents=True, exist_ok=True)
 
+    # Keep locus-definition-dependent mappings separate from the legacy run,
+    # which included PHAS21/PHAS24 loci under the TAS label. Collapsed sample
+    # counts stay in the parent work directory and can still be reused.
+    mapping_work_dir = work_dir / "canonical_TAS_v2"
+    if not config["dry_run"]:
+        mapping_work_dir.mkdir(parents=True, exist_ok=True)
+
     loci = _load_loci(config["rnatype_annotation"])
     loci_by_key = {locus["key"]: locus for locus in loci}
     index_prefix = _write_locus_reference(
-        loci, config["genome_fasta"], work_dir, config["bowtie_build"],
+        loci, config["genome_fasta"], mapping_work_dir, config["bowtie_build"],
         config["threads"], config["dry_run"],
     )
     if config["dry_run"]:
         return
-    database_path = work_dir / "locus_bubble.sqlite"
+    database_path = mapping_work_dir / "locus_bubble.sqlite"
     database = _open_database(database_path)
     try:
         unique_fasta, count_files = _count_sequences(
             samples, config["srna_mapping_dir"], database, work_dir, config["resume"]
         )
         _map_unique_sequences(
-            unique_fasta, index_prefix, database, work_dir, config["bowtie"],
+            unique_fasta, index_prefix, database, mapping_work_dir, config["bowtie"],
             config["threads"], config["resume"], config["dry_run"],
         )
         event_map = _load_event_map(database)
@@ -472,6 +537,7 @@ def run(samples, config):
         matrices, totals, exact_totals = _aggregate(
             event_map, count_files, samples, loci_by_key, canonical
         )
+        del event_map
     finally:
         database.close()
 
@@ -479,22 +545,10 @@ def run(samples, config):
         loci, totals, exact_totals, len(samples), config["locus_bubble_hc_min_abundance"]
     )
     _write_tables(output_dir, selected, matrices, totals, samples, canonical)
-    for tissue, sample_group in sample_groups.items():
-        tas_pdf = output_dir / f"{tissue}_TAS_tailing_trimming_bubble.pdf"
-        hc_pdf = output_dir / (
-            f"{tissue}_hc_siRNA_abundance_ge_"
-            f"{config['locus_bubble_hc_min_abundance']}_tailing_trimming_bubble.pdf"
-        )
-        _plot_pdf(
-            tas_pdf, selected, "TAS", matrices, sample_group,
-            config["locus_bubble_cols"],
-        )
-        _plot_hc_aggregate(
-            hc_pdf, selected, matrices, sample_group, config["locus_bubble_cols"],
-            config["locus_bubble_hc_min_abundance"],
-        )
+    _plot_groups(output_dir, sample_groups, selected, matrices, config)
     logging.info(
         "Locus bubbles complete: %d TAS loci and %d hc-siRNA loci",
         sum(item[0]["type"] == "TAS" for item in selected),
         sum(item[0]["type"] == "hc-siRNA" for item in selected),
     )
+    completion_marker.touch()
