@@ -4,7 +4,10 @@ import logging
 import sys
 from pathlib import Path
 
-from pipeline import bubble, length, mapping_summary, preprocess, profile, rnatype, srna, tailbase
+from pipeline import (
+    bubble, length, locus_bubble, mapping_summary, preprocess, profile, rnatype, srna,
+    tailbase, tailbase_group,
+)
 from pipeline.common import (
     discover_fastqs,
     require_bowtie_index,
@@ -43,7 +46,8 @@ DEFAULT_FEATURECOUNTS = str(next(
 ))
 DEFAULT_RSCRIPT = "/usr/local/bin/Rscript"
 STEP_ORDER = (
-    "preprocess", "profile", "bubble", "srna", "mapping_summary", "rnatype", "length", "tailbase"
+    "preprocess", "profile", "bubble", "srna", "mapping_summary", "rnatype",
+    "locus_bubble", "length", "tailbase",
 )
 STEP_ALIASES = {
     "preprocess": "preprocess", "profile": "profile", "srna": "srna",
@@ -51,7 +55,9 @@ STEP_ALIASES = {
     "srna_workflow": "srna", "mapping": "mapping_summary",
     "mapping_summary": "mapping_summary", "length": "length",
     "rnatype": "rnatype", "rna_type": "rnatype", "rna-type": "rnatype",
+    "locus_bubble": "locus_bubble", "locus-bubble": "locus_bubble",
     "length_dist": "length", "tailbase": "tailbase", "tail_base": "tailbase",
+    "tailbase_group": "tailbase_group", "tail_base_group": "tailbase_group",
 }
 
 
@@ -69,7 +75,7 @@ def parse_args(argv=None):
                         help="threads used by each external tool process (default: 8)")
     parser.add_argument("--suffix", default=".fastq.gz",
                         help="input filename suffix removed to form sample names")
-    parser.add_argument("--adapter", default="AGATCGGAAGAG")
+    parser.add_argument("--adapter", default="TGGAATTCTCGGGTGCCAAGG")
     parser.add_argument("--umi-flag", type=int, choices=(1, 2), default=2,
                         help="1: UMI library; 2: standard small-RNA library")
     parser.add_argument("--mir-hairpin", default=DEFAULT_HAIRPIN,
@@ -86,6 +92,16 @@ def parse_args(argv=None):
                         help="optional RNA-type priority file, one category per line")
     parser.add_argument("--rnatype-stranded", type=int, choices=(0, 1, 2), default=0,
                         help="featureCounts strand mode: 0 unstranded, 1 forward, 2 reverse")
+    parser.add_argument("--locus-bubble-output", default=None,
+                        help="TAS/hc-siRNA bubble output directory; default: <output>/results/tailing_trimming/locus_bubble")
+    parser.add_argument("--locus-bubble-metadata", default=None,
+                        help="optional sample metadata TSV used for configurable PDF grouping")
+    parser.add_argument("--locus-bubble-group-columns", default="tissue,replicate",
+                        help="comma-separated metadata columns defining separate PDFs (default: tissue,replicate)")
+    parser.add_argument("--locus-bubble-hc-min-abundance", type=int, default=100,
+                        help="retain hc-siRNA loci reaching this raw count in at least one sample (default: 100)")
+    parser.add_argument("--locus-bubble-cols", type=int, default=2,
+                        help="sample panels per row in TAS/hc-siRNA bubble PDFs (default: 2, matching the original bubble plot)")
     parser.add_argument("--shortstack", default=DEFAULT_SHORTSTACK,
                         help="ShortStack executable")
     parser.add_argument("--featurecounts", default=DEFAULT_FEATURECOUNTS,
@@ -95,6 +111,12 @@ def parse_args(argv=None):
     parser.add_argument("--sequence-merge-file", default=str(RESOURCES / "miRNA_sequence_merge.txt"))
     parser.add_argument("--rscript", default=DEFAULT_RSCRIPT,
                         help=f"Rscript executable used by tailbase (default: {DEFAULT_RSCRIPT})")
+    parser.add_argument("--tailbase-group-metadata", default=None,
+                        help="TSV with sample_raw, tissue, genotype, replicate columns")
+    parser.add_argument("--tailbase-group-output", default=None,
+                        help="group-summary output directory; default: <tailbase>/group_summary")
+    parser.add_argument("--tailbase-group-max-length", type=int, default=7,
+                        help="maximum tailing/trimming length in group plots (default: 7)")
     parser.add_argument("--bubble-output", default=None,
                         help="multi-page bubble plot PDF; default depends on --layout")
     parser.add_argument("--bubble-cols", type=int, default=2,
@@ -122,7 +144,8 @@ def parse_steps(raw):
         if not key:
             continue
         if key not in STEP_ALIASES:
-            raise ValueError(f"Unknown step '{key}'. Allowed: all, {', '.join(STEP_ORDER)}")
+            allowed = list(STEP_ORDER) + ["tailbase_group"]
+            raise ValueError(f"Unknown step '{key}'. Allowed: all, {', '.join(allowed)}")
         step = STEP_ALIASES[key]
         if step not in steps:
             steps.append(step)
@@ -151,7 +174,7 @@ def _discover_existing_samples(remapping):
 
 def build_samples(args, steps, config):
     if not set(steps).intersection(
-        {"preprocess", "profile", "bubble", "srna", "rnatype", "length", "tailbase"}
+        {"preprocess", "profile", "bubble", "srna", "rnatype", "locus_bubble", "length", "tailbase"}
     ):
         return []
     if args.filelist:
@@ -172,8 +195,9 @@ def preflight(args, steps, config):
     if "tailbase" in steps:
         for key in ("tailbase_script", "mechanism_file", "sequence_merge_file"):
             require_file(config[key], key.replace("_", " "))
-    if args.jobs < 1 or args.threads_per_sample < 1 or args.bubble_cols < 1:
-        raise ValueError("--jobs, --threads-per-sample, and --bubble-cols must be at least 1")
+    if (args.jobs < 1 or args.threads_per_sample < 1 or args.bubble_cols < 1
+            or args.locus_bubble_cols < 1):
+        raise ValueError("job, thread, and bubble-column counts must be at least 1")
     if "preprocess" in steps:
         config["trim_galore"] = require_executable("trim_galore")
         config["bowtie"] = require_executable("bowtie")
@@ -190,8 +214,23 @@ def preflight(args, steps, config):
         require_file(config["rnatype_annotation"], "RNA-type GFF3 annotation")
         if config["rnatype_priority"] is not None:
             require_file(config["rnatype_priority"], "RNA-type priority file")
+    if "locus_bubble" in steps:
+        config["bowtie"] = require_executable("bowtie")
+        config["bowtie_build"] = require_executable("bowtie-build")
+        require_file(config["genome_fasta"], "genome FASTA")
+        require_file(config["rnatype_annotation"], "RNA-type GFF3 annotation")
+        if args.locus_bubble_hc_min_abundance < 0:
+            raise ValueError("--locus-bubble-hc-min-abundance cannot be negative")
+        if config["locus_bubble_metadata"] is not None:
+            require_file(config["locus_bubble_metadata"], "locus bubble metadata")
     if "tailbase" in steps:
         config["rscript"] = require_executable(args.rscript)
+    if "tailbase_group" in steps:
+        if config["tailbase_group_metadata"] is None:
+            raise ValueError("--tailbase-group-metadata is required for --steps tailbase_group")
+        require_file(config["tailbase_group_metadata"], "tailbase group metadata")
+        if not 1 <= args.tailbase_group_max_length <= 10:
+            raise ValueError("--tailbase-group-max-length must be between 1 and 10")
 
 
 def build_config(args):
@@ -228,6 +267,7 @@ def build_config(args):
             "rnatype_shortstack_dir": srna_work / "rnatype" / "shortstack",
             "rnatype_annotation_dir": srna_work / "rnatype" / "featurecounts",
             "rnatype_results_dir": srna_results / "rnatype",
+            "locus_bubble_work_dir": tt_work / "locus_bubble",
         }
         default_bubble = tt_results / "bubble" / "tailing_trimming_bubble.pdf"
         default_mapping_results = srna_results / "mapping_summary.tsv"
@@ -249,6 +289,7 @@ def build_config(args):
             "rnatype_shortstack_dir": output_dir / "6_RNA_type_analysis" / "work" / "shortstack",
             "rnatype_annotation_dir": output_dir / "6_RNA_type_analysis" / "work" / "featurecounts",
             "rnatype_results_dir": output_dir / "6_RNA_type_analysis" / "results",
+            "locus_bubble_work_dir": output_dir / "locus_bubble_work",
         }
         default_bubble = summary_dir / "plot_bubble" / "tailing_trimming_bubble.pdf"
         default_mapping_results = output_dir / f"mapping_results_bowtie_{args.mapping_tag}.csv"
@@ -260,6 +301,11 @@ def build_config(args):
     mapping_results = (
         Path(args.mapping_results).expanduser().resolve() if args.mapping_results
         else default_mapping_results
+    )
+    locus_bubble_output = (
+        Path(args.locus_bubble_output).expanduser().resolve() if args.locus_bubble_output
+        else (tt_results / "locus_bubble" if layout == "organized"
+              else output_dir / "5_GMC_analysis" / "plot_locus_bubble")
     )
     config = {
         "output_dir": output_dir,
@@ -276,10 +322,30 @@ def build_config(args):
             Path(args.rnatype_priority).expanduser().resolve() if args.rnatype_priority else None
         ),
         "rnatype_stranded": args.rnatype_stranded,
+        "locus_bubble_output": locus_bubble_output,
+        "locus_bubble_metadata": (
+            Path(args.locus_bubble_metadata).expanduser().resolve()
+            if args.locus_bubble_metadata else None
+        ),
+        "locus_bubble_group_columns": tuple(
+            value.strip() for value in args.locus_bubble_group_columns.split(",")
+            if value.strip()
+        ),
+        "locus_bubble_hc_min_abundance": args.locus_bubble_hc_min_abundance,
+        "locus_bubble_cols": args.locus_bubble_cols,
         "meta_file": Path(args.meta_file).expanduser().resolve(),
         "mechanism_file": Path(args.mechanism_file).expanduser().resolve(),
         "sequence_merge_file": Path(args.sequence_merge_file).expanduser().resolve(),
         "tailbase_script": ASSETS / "tail_base_summary.R",
+        "tailbase_group_metadata": (
+            Path(args.tailbase_group_metadata).expanduser().resolve()
+            if args.tailbase_group_metadata else None
+        ),
+        "tailbase_group_output": (
+            Path(args.tailbase_group_output).expanduser().resolve()
+            if args.tailbase_group_output else paths["tailbase_plot_dir"].parent / "group_summary"
+        ),
+        "tailbase_group_max_length": args.tailbase_group_max_length,
         "bubble_output": bubble_output,
         "bubble_cols": args.bubble_cols,
         "mapping_results": mapping_results,
@@ -325,12 +391,16 @@ def main(argv=None):
                     logging.info("Mapping summary contains %d samples", len(result))
             elif step == "rnatype":
                 rnatype.run(samples, config, args.jobs)
+            elif step == "locus_bubble":
+                locus_bubble.run(samples, config)
             elif step == "length":
                 length.run(samples, config, args.jobs)
             elif step == "tailbase":
                 if not args.dry_run:
                     require_file(config["mapping_results"], "mapping results")
                 tailbase.run(samples, config, args.jobs)
+            elif step == "tailbase_group":
+                tailbase_group.run(config)
             logging.info("Finished step: %s", step)
         logging.info("Pipeline completed successfully")
         return 0

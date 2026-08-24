@@ -125,16 +125,16 @@ def _run_shortstack(sample, reads, config):
 def _run_featurecounts(sample, bam_file, config):
     annotation_dir = Path(config["rnatype_annotation_dir"])
     annotation_dir.mkdir(parents=True, exist_ok=True)
+    annotation = _prepare_annotation_saf(config["rnatype_annotation"], annotation_dir)
     tagged_bam = annotation_dir / f"{sample}.featureCounts.bam"
     if tagged_bam.is_file():
         return tagged_bam
     count_file = annotation_dir / f"{sample}.featureCounts.txt"
     command = [
         config["featurecounts"],
-        "-a", config["rnatype_annotation"],
+        "-a", annotation,
+        "-F", "SAF",
         "-o", count_file,
-        "-t", "gene,ncRNA_gene",
-        "-g", "biotype",
         "-T", config["threads"],
         "-s", config["rnatype_stranded"],
         "-O", "-M", "-R", "BAM", "--largestOverlap", "--fraction",
@@ -153,6 +153,51 @@ def _run_featurecounts(sample, bam_file, config):
         raise FileNotFoundError(f"featureCounts tagged BAM not found for {sample}; expected {expected}")
     shutil.move(str(generated), tagged_bam)
     return tagged_bam
+
+
+def _prepare_annotation_saf(annotation_file, output_dir):
+    """Convert gene-level GFF3 records to SAF for featureCounts.
+
+    featureCounts accepts only one value for ``-t``.  The Arabidopsis
+    annotation represents RNA loci as both ``gene`` and ``ncRNA_gene``, so a
+    comma-separated ``-t gene,ncRNA_gene`` silently selects no records.  SAF
+    lets both record types be retained while using the GFF3 ``biotype`` as the
+    feature identifier consumed by the downstream classifier.
+    """
+    annotation_file = Path(annotation_file)
+    output = Path(output_dir) / f"{annotation_file.stem}.gene_ncRNA_gene.by_biotype.saf"
+    if output.is_file() and output.stat().st_size > 0:
+        return output
+
+    temporary = output.with_name(f".{output.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+    selected = 0
+    with open(annotation_file) as source, open(temporary, "w") as target:
+        target.write("GeneID\tChr\tStart\tEnd\tStrand\n")
+        for line in source:
+            if line.startswith("#"):
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) != 9 or fields[2] not in {"gene", "ncRNA_gene"}:
+                continue
+            attributes = {}
+            for item in fields[8].split(";"):
+                if "=" in item:
+                    key, value = item.split("=", 1)
+                    attributes[key] = value
+            biotype = attributes.get("biotype")
+            if not biotype:
+                continue
+            target.write(
+                f"{biotype}\t{fields[0]}\t{fields[3]}\t{fields[4]}\t{fields[6]}\n"
+            )
+            selected += 1
+    if not selected:
+        temporary.unlink(missing_ok=True)
+        raise ValueError(
+            f"No gene or ncRNA_gene records with biotype found in annotation: {annotation_file}"
+        )
+    os.replace(temporary, output)
+    return output
 
 
 def _choose_type(record, priorities):

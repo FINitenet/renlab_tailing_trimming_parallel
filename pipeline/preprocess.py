@@ -54,7 +54,8 @@ def run_sample(item, config):
     trim_command = [
         config["trim_galore"], "--fastqc", "--fastqc_args", f"-t {threads} --nogroup",
         "--gzip", "-q", "20", "--length", "12", "--max_length", "30",
-        "--trim-n", "--basename", sample, "--no_report_file", "-a", config["adapter"],
+        "--trim-n", "--stringency", "3", "--basename", sample, "--no_report_file",
+        "-a", config["adapter"],
         "-j", threads, "-o", format_dir, input_file,
     ]
     log_path = format_dir / f"{sample}.log.txt"
@@ -75,14 +76,14 @@ def run_sample(item, config):
         unmapped_genome = remapping_dir / "unmapped-to-genome.fasta"
         clean_fasta = remapping_dir / "clean.fasta"
         _run_bowtie([
-            config["bowtie"], "-p", threads, "-v", "0", "-S", "-a", "-x",
-            config["trsno"], "-f", unmapped_genome, "--un", clean_fasta,
+            config["bowtie"], "-p", threads, "-v", "0", "-S", "-a", "-f",
+            "--un", clean_fasta, config["trsno"], unmapped_genome,
             remapping_dir / "map2trsnoRNA.sam",
         ], log_handle, dry_run)
         _run_bowtie([
-            config["bowtie"], "-p", threads, "-v", "0", "-S", "-a", "-x",
-            config["mir_hairpin"], "-f", clean_fasta, "--un",
-            remapping_dir / "unmapped-0.fasta", remapping_dir / "mapped-0.sam",
+            config["bowtie"], "-p", threads, "-v", "0", "-S", "-a", "-f",
+            "--un", remapping_dir / "unmapped-0.fasta", config["mir_hairpin"],
+            clean_fasta, remapping_dir / "mapped-0.sam",
         ], log_handle, dry_run)
 
         for trim_length in range(1, 11):
@@ -100,8 +101,8 @@ def run_sample(item, config):
                     SeqIO.write(records(), target, "fasta")
             _run_bowtie([
                 config["bowtie"], "-p", threads, "-v", "0", "-S", "-a", "--norc",
-                "--no-unal", "-x", config["mir_hairpin"], "-f", trimmed, "--un",
-                remapping_dir / f"unmapped-{trim_length}.fasta",
+                "--no-unal", "-f", "--un",
+                remapping_dir / f"unmapped-{trim_length}.fasta", config["mir_hairpin"], trimmed,
                 remapping_dir / f"mapped-{trim_length}.sam",
             ], log_handle, dry_run)
     finally:

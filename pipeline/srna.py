@@ -18,7 +18,7 @@ UMI_LINKER = "AACTGTAGGCACCATCAAT"
 def _trim(input_file, output_dir, sample, threads, trim_galore, adapter, dry_run):
     command = [
         trim_galore, "--fastqc", "--fastqc_args", f"-t {threads} --nogroup",
-        "--basename", sample, "--gzip", "--length", "10", "--trim-n",
+        "--basename", sample, "--gzip", "--length", "10", "--trim-n", "--stringency", "3",
         "--suppress_warn", "-j", threads, "-o", output_dir,
     ]
     if adapter:
@@ -48,9 +48,9 @@ def _extract_umi(trimmed_fastq, output_fasta, sample):
 def _map_umi(umi_fasta, umi_dir, sample, config):
     command = [
         config["bowtie"], "-f", "-p", config["threads"], "-m", "50", "-v", "0",
-        "--best", "--strata", "-a", "--no-unal", "-x", config["genome_index"],
-        umi_fasta, "-S", umi_dir / f"{sample}_aligned.sam", "--al",
-        umi_dir / f"{sample}_aligned.fa",
+        "--best", "--strata", "-a", "--no-unal", "-S", "--al",
+        umi_dir / f"{sample}_aligned.fa", config["genome_index"], umi_fasta,
+        umi_dir / f"{sample}_aligned.sam",
     ]
     if config["dry_run"]:
         run_command(command, dry_run=True)
@@ -85,9 +85,9 @@ def _map_reads(trimmed_fastq, mapping_dir, sample, config):
 
     bowtie_command = [
         config["bowtie"], "-p", config["threads"], "-m", "50", "-v", "0",
-        "--best", "--strata", "-a", "--no-unal", "-x", config["genome_index"],
-        filtered, "-S", mapping_dir / f"{sample}_aligned.sam", "--al",
-        mapping_dir / f"{sample}_aligned.fq",
+        "--best", "--strata", "-a", "--no-unal", "-S", "--al",
+        mapping_dir / f"{sample}_aligned.fq", config["genome_index"], filtered,
+        mapping_dir / f"{sample}_aligned.sam",
     ]
     if config["dry_run"]:
         run_command(bowtie_command, dry_run=True)

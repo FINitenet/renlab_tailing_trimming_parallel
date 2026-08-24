@@ -19,7 +19,8 @@ def summarize(input_dir, output_file):
         for line in log_file.read_text().splitlines():
             if "reads processed" in line:
                 values["total"] = _first_integer(line)
-            elif "reads with at least one alignment" in line:
+            elif ("reads with at least one alignment" in line
+                  or "reads with at least one reported alignment" in line):
                 values["mapped"] = _first_integer(line)
             elif "Reported" in line:
                 values["reported"] = _first_integer(line)

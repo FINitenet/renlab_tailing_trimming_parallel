@@ -70,6 +70,8 @@ flowchart TD
 - 5GMC reads 及 sequence-logo 输入文件
 - 全长 reads 和 5GMC 的长度分布工作簿及样本级双面板 PDF
 - 不同末端碱基及修饰长度的计数、比例和 RPM 结果
+- 按组织/基因型汇总生物学重复的 A/C/G/T 分碱基 tailing/trimming 图（可选）
+- TAS（全部注释位点）和高丰度 hc-siRNA locus 的 trimming–tailing 气泡图
 - 常规或 UMI small RNA 的基因组比对结果及 mapping statistics
 - ShortStack 定位后的 RNA type 计数、比例、长度分布及多样本组成图
 
@@ -173,9 +175,15 @@ project_output/
     │   │   ├── <sample>_len_dist.xlsx
     │   │   └── plots/<sample>_length_distribution.pdf
     │   ├── bubble/tailing_trimming_bubble.pdf
+    │   ├── locus_bubble/
+    │   │   ├── <tissue>_R<rep>_TAS_tailing_trimming_bubble.pdf
+    │   │   ├── <tissue>_R<rep>_hc_siRNA_abundance_ge_100_tailing_trimming_bubble.pdf
+    │   │   ├── selected_loci.tsv
+    │   │   └── bubble_matrix_long.tsv
     │   └── tailbase/
     │       ├── tables/<sample>/
     │       ├── plots/<sample>/
+    │       ├── group_summary/
     │       └── workspace/
     └── srna/
         ├── mapping_summary.tsv
@@ -195,7 +203,7 @@ project_output/
 
 ## 分步运行、功能与结果解读
 
-流程可拆分为 8 个步骤。下表中的“直接图形”仅表示该步骤本身是否产图；不直接产图的
+流程包含 8 个默认步骤和 1 个需显式提供分组元数据的可选汇总步骤。下表中的“直接图形”仅表示该步骤本身是否产图；不直接产图的
 步骤通常生成后续统计和绘图所需的标准化中间结果。
 
 | 步骤 | 主要功能 | 前置结果 | 直接图形 |
@@ -206,8 +214,10 @@ project_output/
 | `srna` | 常规/UMI 文库处理、18–28 nt 筛选和基因组比对 | 原始 FASTQ | FastQC HTML |
 | `mapping_summary` | 汇总 Bowtie 日志中的总 reads、mapped reads 和比对率 | `srna` | 不直接产图 |
 | `rnatype` | ShortStack 定位、featureCounts 注释和唯一 RNA type 分类 | `srna` | RNA type 组成图和长度分布图 |
+| `locus_bubble` | 按局部 5′ 锚点统计 TAS/hc-siRNA 的 trimming–tailing；TAS 全保留，hc 默认要求任一样本丰度 ≥100 | `srna` | TAS 和 hc-siRNA 多页 PDF |
 | `length` | 统计 miRNA 全长 reads 与 5GMC 的长度分布 | `preprocess` | Excel 内嵌图和样本级 PDF |
 | `tailbase` | 汇总 trimming、总体 tailing 和非模板 tailing 的长度及碱基组成 | `profile`、`mapping_summary` | 每个样本 2 个 PDF |
+| `tailbase_group`（可选） | 按组织和基因型汇总重复，绘制 A/C/G/T 分色的非模板 tailing 与 trimming | `tailbase`、分组元数据 | 每个组织 1 个 PDF + PNG |
 
 ```mermaid
 flowchart LR
@@ -346,6 +356,42 @@ python3 main.py \
 
 ![RNA type output example](docs/images/rnatype_example.png)
 
+### 6b. `locus_bubble`：TAS 与 hc-siRNA locus 末端修饰气泡图
+
+该步骤不把整个 locus 锁定到单一 5′ 端，而是以 `locus + 链方向 + 5′ 起点` 作为局部
+锚点。每个锚点内，以跨样本丰度最高的完全匹配 read 长度作为未截短参照；不能完全
+匹配的 reads 从 3′ 端逐碱基去除 1–10 nt，第一次匹配 locus 时去除的长度定义为
+non-templated tailing。这样可同时容纳同一 TAS/hc-siRNA locus 上的多个加工位点，又
+不会把所有不同长度的完全匹配 reads 无条件视为同一个原点。为避免短核心在重复区
+产生偶然匹配，加尾 read 只有落在至少一条完全匹配 read 支持的局部锚点时才进入矩阵。
+
+```bash
+python3 main.py \
+  -o project_output \
+  --steps locus_bubble \
+  --locus-bubble-metadata sample_information.tsv \
+  --locus-bubble-group-columns tissue,replicate \
+  --locus-bubble-hc-min-abundance 100 \
+  --locus-bubble-cols 2 \
+  --resume
+```
+
+TAS 注释位点全部逐 locus 绘制。hc-siRNA 只有在至少一个样本中完全匹配 raw abundance 达到阈值时保留，
+避免多个弱样本简单累加后进入结果。每条序列只分配给组合 locus 参考中的一个最佳零
+错配位置，从而避免重复区 read 在多个 hc-siRNA locus 中重复计数。入选的 hc-siRNA
+locus 按用户指定的元数据列分别汇总成多样本大图；当前项目按组织和生物学重复拆分，
+每个文件包含同一重复的各基因型；
+逐 locus 数值仍保存在表格中，
+避免产生无法审阅的数千页 PDF。绘图直接调用原 `bubble` 面板函数，保留原坐标方向、
+气泡缩放、颜色、字体、网格和两列布局。主要结果位于
+`results/tailing_trimming/locus_bubble/`；`selected_loci.tsv` 记录筛选依据，
+`bubble_matrix_long.tsv` 保存作图数值。
+
+流程不预设重复数或基因型数，实际数量由元数据行自动推断。通过
+`--locus-bubble-group-columns` 可自定义哪些元数据列决定独立PDF，例如
+`tissue,replicate`、`batch,replicate` 或只使用 `tissue`；每组包含多少基因型/样本也无需
+额外设置，流程会按元数据自动布局。
+
 ### 7. `length`：全长 reads 与 5GMC 长度分布
 
 该步骤从 miRNA remapping SAM 统计原始 read 长度及对应的 5GMC 长度，并以 mapped
@@ -388,6 +434,38 @@ python3 main.py -o project_output --steps tailbase --resume
 
 ![Tail-base output example](docs/images/tailbase_example.png)
 
+### 可选：`tailbase_group` 分组汇总图
+
+该步骤读取 `tailbase` 已生成的 `*_tail_nt_summary.xlsx` 和 `*_trim_summary.xlsx`，按组织、
+基因型及生物学重复汇总。正向堆叠柱分别表示 Tailing A/C/G/T，Trimming 显示在零线下方；
+误差线为重复间 SD。它不包含在默认 `--steps all` 中，避免没有实验分组信息的项目失败。
+
+分组元数据为制表符分隔文件，至少包含以下列：
+
+```text
+sample_raw\ttissue\tgenotype\treplicate
+sample_1\tLeaf\tWT\t1
+sample_2\tLeaf\tWT\t2
+sample_3\tLeaf\tWT\t3
+```
+
+运行示例：
+
+```bash
+python3 main.py \
+  -o project_output \
+  --steps tailbase_group \
+  --tailbase-group-metadata sample_information.tsv \
+  --tailbase-group-max-length 7
+```
+
+主要结果位于 `results/tailing_trimming/tailbase/group_summary/`：
+
+- `<tissue>_miRNA_tailing_trimming.pdf/png`
+- `miRNA_tailing_trimming_long.tsv`
+- `miRNA_tailing_trimming_group_summary.tsv`
+- `miRNA_tailing_total_group_summary.tsv`
+
 从已有 `work/tailing_trimming/remapping/<sample>/` 继续运行时，可以省略原始 FASTQ，
 或用 `--filelist` 指定样本。旧目录通过 `--layout legacy` 继续支持。`--resume` 根据每一步
 的最终输出跳过已完成任务；`--dry-run` 用于检查样本、参数、索引和即将执行的命令。
@@ -422,6 +500,7 @@ TAIR10，可通过 `--genome-fasta` 和 `--rnatype-annotation` 替换。featureC
 main.py                 统一入口和步骤调度
 pipeline/               Python 实现；样本级受控并行
 pipeline/bubble.py      多样本 trimming–tailing 气泡矩阵图
+pipeline/tailbase_group.py  按组织/基因型汇总 A/C/G/T tailing 与 trimming
 pipeline/rnatype.py     ShortStack/featureCounts RNA type 分类与绘图
 assets/tail_base_summary.R  本地 R 汇总脚本
 docs/                   README 匿名示意图及其可重复生成脚本
