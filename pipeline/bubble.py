@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.patches import Circle
 
 
 COLORS = (
@@ -47,12 +48,18 @@ def _plot_sample(axis, matrix, sample, total, color):
     coordinates = np.arange(10, -1, -1)
     x_values, y_values = np.meshgrid(coordinates, coordinates)
     matrix_sum = matrix.sum()
-    sizes = matrix.ravel() / matrix_sum * 1500 if matrix_sum else np.zeros(121)
-
-    axis.scatter(
-        x_values.ravel(), y_values.ravel(), s=sizes, color=color,
-        edgecolors="none", zorder=3,
-    )
+    if matrix_sum:
+        # Match the original ggforce::geom_circle implementation: radius is
+        # expressed in grid/data units, so it remains stable across page and
+        # panel sizes. Area stays proportional to read abundance.
+        radii = np.sqrt(matrix.ravel() / matrix_sum) * 0.75
+        for x_value, y_value, radius in zip(
+                x_values.ravel(), y_values.ravel(), radii):
+            if radius > 0:
+                axis.add_patch(Circle(
+                    (x_value, y_value), radius=radius,
+                    facecolor=color, edgecolor="none", zorder=3,
+                ))
     axis.set_xlim(11, -1)
     axis.set_ylim(-1, 11)
     axis.set_xticks(range(11))
